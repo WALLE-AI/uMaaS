@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="SiliconFlow 模型广场交互设计原型" />
+    <title>SiliconFlow - 模型广场</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="主导航">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
+          <span>硅基流动</span>
+        </div>
+
+        <nav class="nav-scroll">
+          <div class="nav-group">
+            <p class="nav-label">模型</p>
+            <a class="nav-item active" href="#models" aria-current="page"><i data-lucide="boxes"></i><span>模型广场</span></a>
+            <a class="nav-item" href="#tuning"><i data-lucide="sliders-horizontal"></i><span>模型微调</span></a>
+            <a class="nav-item" href="#batch"><i data-lucide="layers-3"></i><span>批量推理</span></a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-label">体验中心</p>
+            <a class="nav-item" href="#chat"><i data-lucide="message-square"></i><span>文本对话</span></a>
+            <a class="nav-item" href="#image"><i data-lucide="image"></i><span>图像生成</span></a>
+            <a class="nav-item" href="#video"><i data-lucide="video"></i><span>视频生成</span></a>
+            <a class="nav-item" href="#audio"><i data-lucide="audio-lines"></i><span>语音合成</span></a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-label">账户管理</p>
+            <a class="nav-item" href="#verify"><i data-lucide="badge-check"></i><span>实名认证</span></a>
+            <a class="nav-item" href="#keys"><i data-lucide="key-round"></i><span>API 密钥</span></a>
+            <a class="nav-item" href="#balance"><i data-lucide="wallet-cards"></i><span>余额充值</span></a>
+            <a class="nav-item" href="#billing"><i data-lucide="receipt-text"></i><span>费用账单</span></a>
+            <a class="nav-item" href="#invoice"><i data-lucide="file-text"></i><span>发票开具</span></a>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button class="collapse-button" id="collapseSidebar" type="button" aria-label="收起侧栏">
+            <i data-lucide="panel-left-close"></i><span>收起侧栏</span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="sidebar-scrim" id="sidebarScrim"></div>
+
+      <main class="main" id="main">
+        <header class="topbar">
+          <div class="topbar-leading">
+            <button class="icon-button mobile-menu" id="mobileMenu" type="button" aria-label="打开导航">
+              <i data-lucide="menu"></i>
+            </button>
+            <div>
+              <p class="breadcrumb">模型</p>
+              <h1>模型广场</h1>
+            </div>
+          </div>
+          <div class="account-actions">
+            <div class="balance-chip"><span>余额</span><strong>￥68.42</strong></div>
+            <button class="icon-button has-dot" type="button" aria-label="通知"><i data-lucide="bell"></i></button>
+            <button class="avatar" type="button" aria-label="账户菜单">SF</button>
+          </div>
+        </header>
+
+        <section class="workspace" aria-labelledby="catalog-title">
+          <div class="catalog-heading">
+            <div>
+              <h2 id="catalog-title">选择适合你的模型</h2>
+              <p>统一 API 调用，覆盖文本、视觉、语音与视频能力</p>
+            </div>
+            <button class="docs-button" type="button" data-toast="API 文档已在新窗口打开">
+              <i data-lucide="book-open"></i><span>API 文档</span><i data-lucide="arrow-up-right"></i>
+            </button>
+          </div>
+
+          <div class="toolbar">
+            <button class="filter-toggle" id="filterToggle" type="button" aria-expanded="false" aria-controls="filterPanel">
+              <i data-lucide="list-filter"></i><span>展开筛选器</span><i class="filter-chevron" data-lucide="chevron-down"></i>
+            </button>
+            <label class="search-box">
+              <i data-lucide="search"></i>
+              <input id="searchInput" type="search" placeholder="搜索模型名称、厂商或能力" autocomplete="off" />
+              <kbd id="searchHint">/</kbd>
+              <button class="clear-search" id="clearSearch" type="button" aria-label="清除搜索"><i data-lucide="x"></i></button>
+            </label>
+            <button class="free-filter" id="freeFilter" type="button" aria-pressed="false">
+              <i data-lucide="badge-dollar-sign"></i><span>免费模型</span>
+            </button>
+          </div>
+
+          <div class="filter-panel" id="filterPanel" hidden>
+            <div class="filter-row">
+              <span class="filter-name">模型类型</span>
+              <div class="filter-options" data-filter="type">
+                <button class="filter-pill active" type="button" data-value="全部">全部</button>
+                <button class="filter-pill" type="button" data-value="对话">对话</button>
+                <button class="filter-pill" type="button" data-value="视觉">视觉</button>
+                <button class="filter-pill" type="button" data-value="图像">图像</button>
+                <button class="filter-pill" type="button" data-value="嵌入">嵌入</button>
+                <button class="filter-pill" type="button" data-value="语音">语音</button>
+                <button class="filter-pill" type="button" data-value="视频">视频</button>
+              </div>
+            </div>
+            <div class="filter-row">
+              <span class="filter-name">核心能力</span>
+              <div class="filter-options" data-filter="capability">
+                <button class="filter-pill active" type="button" data-value="全部">全部</button>
+                <button class="filter-pill" type="button" data-value="推理">推理</button>
+                <button class="filter-pill" type="button" data-value="Tools">Tools</button>
+                <button class="filter-pill" type="button" data-value="Coder">Coder</button>
+                <button class="filter-pill" type="button" data-value="多模态">多模态</button>
+                <button class="filter-pill" type="button" data-value="长文本">长文本</button>
+              </div>
+            </div>
+            <div class="filter-row">
+              <span class="filter-name">模型厂商</span>
+              <div class="filter-options" data-filter="vendor">
+                <button class="filter-pill active" type="button" data-value="全部">全部</button>
+                <button class="filter-pill" type="button" data-value="DeepSeek">DeepSeek</button>
+                <button class="filter-pill" type="button" data-value="Qwen">Qwen</button>
+                <button class="filter-pill" type="button" data-value="Moonshot AI">Moonshot AI</button>
+                <button class="filter-pill" type="button" data-value="Zhipu AI">Zhipu AI</button>
+                <button class="filter-pill" type="button" data-value="MiniMax">MiniMax</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="result-bar">
+            <div class="result-summary">
+              <strong id="resultCount">0</strong><span>个可用模型</span>
+              <div class="active-filters" id="activeFilters"></div>
+            </div>
+            <label class="sort-control">
+              <span>排序</span>
+              <select id="sortSelect">
+                <option value="recommended">综合推荐</option>
+                <option value="newest">最新发布</option>
+                <option value="price-low">价格从低到高</option>
+                <option value="context-high">上下文从高到低</option>
+              </select>
+              <i data-lucide="chevron-down"></i>
+            </label>
+          </div>
+
+          <div class="model-grid" id="modelGrid" aria-live="polite"></div>
+
+          <div class="empty-state" id="emptyState" hidden>
+            <div class="empty-icon"><i data-lucide="search-x"></i></div>
+            <h3>未找到匹配的模型</h3>
+            <p>调整关键词或清除部分筛选条件</p>
+            <button type="button" id="resetFilters">重置筛选</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="drawer-layer" id="drawerLayer" aria-hidden="true">
+      <div class="drawer-backdrop" id="drawerBackdrop"></div>
+      <aside class="model-drawer" id="modelDrawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <div id="drawerContent"></div>
+      </aside>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+    <script src="lucide.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

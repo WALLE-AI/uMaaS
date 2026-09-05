@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="OpenRouter 风格 AI 模型路由平台交互设计原型">
+  <title>OpenRouter UI Study - AI Model Router</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#home" aria-label="回到首页">
+      <span class="brand-route" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>OpenRouter</span><em>UI Study</em>
+    </a>
+    <nav class="desktop-nav" aria-label="主导航">
+      <a href="#models">Models</a><a href="#providers">Providers</a><a href="#benchmarks">Benchmarks</a><a href="#rankings">Rankings</a><a href="#ori">Ori</a>
+    </nav>
+    <div class="header-actions">
+      <a class="docs-link" href="#docs">Docs <i data-lucide="arrow-up-right"></i></a>
+      <button class="icon-btn" id="themeButton" aria-label="切换主题" title="切换主题"><i data-lucide="sun"></i></button>
+      <button class="sign-in" data-toast="登录窗口已打开">Sign in</button>
+      <button class="primary small" data-toast="注册流程已打开">Sign up</button>
+      <button class="icon-btn menu-button" id="menuButton" aria-label="打开导航"><i data-lucide="menu"></i></button>
+    </div>
+  </header>
+  <div class="mobile-nav" id="mobileNav">
+    <a href="#models">Models</a><a href="#providers">Providers</a><a href="#benchmarks">Benchmarks</a><a href="#rankings">Rankings</a><a href="#ori">Ori Harness</a><a href="#docs">Docs</a>
+  </div>
+
+  <main id="app"></main>
+
+  <div class="drawer-shell" id="drawerShell" aria-hidden="true">
+    <div class="drawer-scrim" data-close-drawer></div>
+    <aside class="model-drawer" id="modelDrawer" role="dialog" aria-modal="true"></aside>
+  </div>
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+  <script src="../siliconflow/lucide.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
