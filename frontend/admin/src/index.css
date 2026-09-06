@@ -1,0 +1,112 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   层级声明必须在最前面。
+   antd 5+ 用 CSS-in-JS 把样式注入 <head>，默认不属于任何 layer；而按层叠
+   规范，无层样式优先级高于所有 layer —— 结果是 Tailwind 的 utility 永远
+   被 antd 压过（<Button className="mt-4"> 不生效）。
+   解法是 main.tsx 里用 <StyleProvider layer> 把 antd 样式也放进 layer，
+   再在这里声明层序：靠后的赢，utilities 排在 antd 之后即可覆盖。
+   ───────────────────────────────────────────────────────────────────────── */
+@layer theme, base, antd, components, utilities;
+
+@import "tailwindcss";
+
+/* ─── 设计 token 单一来源 ────────────────────────────────────────────────
+   在这里声明一次，同时得到两样东西：
+   1. Tailwind utility 类（bg-brand / text-status-critical / bg-series-1 …）
+   2. antd ConfigProvider 的 token（config/theme.ts 读同一批 CSS 变量）
+   色值只有这一处定义，改一次全站生效。
+
+   必须是 `@theme static`：默认的 `@theme` 会 tree-shake 掉没被 utility 类
+   引用的变量。而 config/viz.ts 是在运行时用 getComputedStyle 读
+   --color-series-N 喂给 Recharts 的 SVG（fill/stroke 吃不了 utility 类），
+   变量一旦被摇掉，读到空串就会静默回落到 viz.ts 里的兜底色 —— 改 CSS 不
+   再影响图表，单一来源就名存实亡。static 保证全部变量落地。
+   ───────────────────────────────────────────────────────────────────────── */
+@theme static {
+  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* 品牌与界面 */
+  --color-brand: #7c3cff;
+  --color-brand-soft: #ede7fb;
+  --color-ink: #171719;
+  --color-ink-secondary: #52514e;
+  --color-ink-muted: #898781;
+  --color-line: #dedee5;
+  --color-line-soft: #ededf1;
+  --color-surface: #ffffff;
+  --color-plane: #f7f7fa;
+
+  /* 环境色带（§3.4） */
+  --color-env-production: #7c3cff;
+  --color-env-staging: #eda100;
+  --color-env-local: #898781;
+
+  /* 分类色板（§4.1）：固定 8 槽，顺序即语义，永不循环 */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+  --color-series-5: #e87ba4;
+  --color-series-6: #008300;
+  --color-series-7: #4a3aa7;
+  --color-series-8: #e34948;
+
+  /* 状态色（§4.2）：保留，永不作系列色，必须图标+文字同时出现 */
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+
+  /* 顺序色（§4.2）：单一蓝色相，浅→深，用于热力图等连续量级 */
+  --color-seq-100: #cde2fb;
+  --color-seq-200: #9ec5f4;
+  --color-seq-300: #6da7ec;
+  --color-seq-400: #3987e5;
+  --color-seq-500: #256abf;
+  --color-seq-600: #184f95;
+  --color-seq-700: #0d366b;
+
+  /* 图表 chrome */
+  --color-grid: #e1e0d9;
+  --color-axis: #c3c2b7;
+}
+
+/* ─── 极少量语义类 ───────────────────────────────────────────────────────
+   只写 Tailwind 表达不了的东西（§3.2 的第 2、3 类）。
+   布局与间距一律用 utility，不要在这里堆样式。
+   ───────────────────────────────────────────────────────────────────────── */
+@layer components {
+  /* 故障/超限的斜线纹理：色盲与黑白打印下的第二编码通道（§4.2） */
+  .viz-hatch {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      color-mix(in srgb, currentColor 45%, transparent) 3px,
+      color-mix(in srgb, currentColor 45%, transparent) 5px
+    );
+  }
+
+  /* 终端日志流的等宽滚动区 */
+  .log-stream {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.7;
+    scrollbar-width: thin;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-plane);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
