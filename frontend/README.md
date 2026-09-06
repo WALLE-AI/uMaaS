@@ -15,6 +15,7 @@ uMaaS（Unified Model as a Service）是一个统一的 AI 模型接入、路由
 - **开发者文档**：提供 API 快速开始、认证、模型路由、工具调用和多模态接入示例。
 - **Agent Harness**：为 Claude Code、Codex CLI、OpenCode 和 Aider 等工具生成模型与路由配置。
 - **账户认证**：包含邮箱登录注册，以及可配置的 GitHub 和 Google OAuth 跳转流程。
+- **用户控制台**：登录后管理 API Keys、用量预算、余额账单、团队权限、登录安全和工作空间设置。
 
 ## 页面结构
 
@@ -27,6 +28,7 @@ uMaaS（Unified Model as a Service）是一个统一的 AI 模型接入、路由
 | `/rankings` | 多模态使用趋势与 13 类排行榜数据 |
 | `/docs` | API 快速开始、代码示例和分组文档目录 |
 | `/harness` | Agent Harness 安装与配置生成器 |
+| `/console/*` | 登录后的工作空间概览、密钥、用量、账单、团队、安全与设置 |
 | `/login` | 邮箱、GitHub 和 Google 登录 |
 | `/signup` | 邮箱、GitHub 和 Google 注册 |
 
@@ -82,10 +84,19 @@ OAuth Client Secret、授权码交换、账户绑定和会话签发必须由后�
 
 ```text
 frontend/
-├── public/logos/       # 模型厂商 Logo
-├── src/App.tsx         # 页面、路由和主要交互
-├── src/data.ts         # 示例模型与榜单数据
-├── src/index.css       # 全局视觉系统和响应式样式
-├── .env.example        # OAuth 环境变量示例
-└── package.json        # 依赖与开发脚本
+├── public/logos/              # 模型厂商 Logo
+├── src/api/                   # API 契约、请求客户端、服务和 OpenAPI 文档
+├── src/components/common/     # 品牌、标题、指标、复制等通用组件
+├── src/components/layout/     # 顶栏、导航、页脚和应用壳层
+├── src/components/models/     # 模型领域组件
+├── src/components/console/    # 登录后控制台布局与数据摘要组件
+├── src/config/                # 导航与 Ant Design 主题配置
+├── src/pages/ConsolePage.tsx  # 用户与工作空间管理模块
+├── src/App.tsx                # 页面组合和路由入口
+├── src/data.ts                # 示例模型与榜单数据
+├── src/index.css              # 全局视觉系统和响应式样式
+├── .env.example               # OAuth 环境变量示例
+└── package.json               # 依赖与开发脚本
 ```
+
+组件通过各级 `index.ts` 统一导出。页面优先从 `./components` 导入公开组件，不应跨目录引用其他组件的内部文件；新增全局导航或主题项分别维护在 `src/config/navigation.ts` 和 `src/config/theme.ts`。

@@ -1,59 +1,25 @@
 import { useMemo, useState } from 'react'
-import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router'
 import {
   ApiOutlined, AppstoreOutlined, ArrowRightOutlined, BarChartOutlined, BookOutlined,
-  CheckCircleFilled, ClockCircleOutlined, CloseOutlined, CodeOutlined, CopyOutlined,
-  DatabaseOutlined, ExperimentOutlined, GlobalOutlined, MenuOutlined, SearchOutlined,
+  CheckCircleFilled, ClockCircleOutlined, CodeOutlined, CopyOutlined,
+  DatabaseOutlined, ExperimentOutlined, GlobalOutlined, SearchOutlined,
   SettingOutlined, ThunderboltOutlined, FilterOutlined, PushpinOutlined,
   UnorderedListOutlined, TableOutlined, SwapOutlined, DownOutlined,
   GithubOutlined, GoogleOutlined, LockOutlined, MailOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons'
-import { Button, ConfigProvider, Drawer, Input, Segmented, Select, Slider, Switch, Tabs, Tag, Tooltip, message } from 'antd'
+import { Button, ConfigProvider, Drawer, Input, Segmented, Select, Slider, Switch, Tabs, Tag, message } from 'antd'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts'
 import { models, rankSections, type Model } from './data'
-
-const nav = [
-  ['/', '首页'], ['/models', '模型'], ['/benchmarks', '评测榜'],
-  ['/docs', '文档'], ['/rankings', '排行榜'], ['/harness', 'Harness'],
-]
-
-function Brand() {
-  return <Link className="brand" to="/" aria-label="uMaaS 首页"><span className="brand-mark"><i /><i /><i /></span><b>uMaaS</b><span className="brand-beta">BETA</span></Link>
-}
-
-function Header() {
-  const [open, setOpen] = useState(false)
-  const navigate = useNavigate()
-  const location = useLocation()
-  return <>
-    <header className="topbar">
-      <Brand />
-      <nav className="desktop-nav">{nav.map(([to, label]) => <NavLink key={to} to={to} end={to === '/'} className={({isActive}) => isActive || (to !== '/' && location.pathname.startsWith(to)) ? 'active' : ''}>{label}</NavLink>)}</nav>
-      <div className="top-actions">
-        <Tooltip title="全局搜索"><Button className="icon-btn desktop-only" icon={<SearchOutlined />} aria-label="全局搜索" /></Tooltip>
-        <Button className="desktop-only" onClick={() => navigate('/login')}>登录</Button>
-        <Button type="primary" className="desktop-only" onClick={() => navigate('/signup')}>免费注册</Button>
-        <Button className="icon-btn mobile-only" icon={<MenuOutlined />} onClick={() => setOpen(true)} aria-label="打开导航" />
-      </div>
-    </header>
-    <Drawer open={open} onClose={() => setOpen(false)} width={320} closeIcon={<CloseOutlined />} title={<Brand />}>
-      <nav className="mobile-nav">{nav.map(([to, label]) => <NavLink key={to} to={to} onClick={() => setOpen(false)}>{label}<ArrowRightOutlined /></NavLink>)}</nav>
-      <div className="mobile-auth-actions"><Button block onClick={() => { setOpen(false); navigate('/login') }}>登录</Button><Button type="primary" block onClick={() => { setOpen(false); navigate('/signup') }}>免费注册</Button></div>
-    </Drawer>
-  </>
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  const location = useLocation()
-  const docsMode = location.pathname.startsWith('/docs')
-  const authMode = ['/login','/signup'].includes(location.pathname)
-  return <div className={`app ${docsMode ? 'docs-mode' : ''} ${authMode ? 'auth-mode' : ''}`}><Header /><main>{children}</main>{!docsMode && !authMode && <footer><Brand /><span>统一接入、路由与评测模型能力</span><span>© 2026 uMaaS</span></footer>}</div>
-}
-
-function Kicker({ children }: { children: React.ReactNode }) { return <div className="kicker"><span />{children}</div> }
-function PageTitle({ eyebrow, title, text, action }: { eyebrow: string, title: string, text: string, action?: React.ReactNode }) {
-  return <section className="page-title"><div><Kicker>{eyebrow}</Kicker><h1>{title}</h1><p>{text}</p></div>{action}</section>
-}
+import {
+  AnalyticsSectionHeader, AnalyticsStatStrip, AppShell, BenchmarkTable, Brand,
+  CopyCode, Kicker, Metric, ModelLogo, ModelRow, PageTitle, RankingInsight,
+  RankingLeaderboard, UsageTrendChart, type BenchmarkRecord,
+  type RankingInsightData, type UsageDatum,
+} from './components'
+import { appTheme } from './config/theme'
+import { RequireAuth, useAuth } from './auth'
+import ConsolePage from './pages/ConsolePage'
 
 const chartData = [
   { n: '00', v: 34 }, { n: '04', v: 45 }, { n: '08', v: 42 }, { n: '12', v: 68 }, { n: '16', v: 61 }, { n: '20', v: 84 }, { n: '24', v: 78 },
@@ -99,10 +65,6 @@ function Feature({ icon, index, title, text }: { icon: React.ReactNode, index: s
   return <article className="feature"><span className="feature-index">{index}</span><div className="feature-icon">{icon}</div><h3>{title}</h3><p>{text}</p><ArrowRightOutlined /></article>
 }
 
-function ModelLogo({ model, large = false }: { model: Model, large?: boolean }) {
-  return <span className={`model-logo ${large ? 'large' : ''}`} style={{ '--logo-color': model.color } as React.CSSProperties}><span>{model.initials}</span><img src={model.logo} alt={`${model.maker} logo`} loading="lazy" onError={event => { event.currentTarget.style.display = 'none' }} /></span>
-}
-
 function ModelsPage() {
   const [query, setQuery] = useState('')
   const [capability, setCapability] = useState('全部')
@@ -146,14 +108,6 @@ function ModelsPage() {
   </div>
 }
 
-function ModelRow({ model, compact=false, pinned=false, selected=false, onPin, onCompare }: { model: Model, compact?:boolean, pinned?:boolean, selected?:boolean, onPin?:()=>void, onCompare?:()=>void }) {
-  return <article className={`model-row ${compact?'compact':''} ${selected?'selected':''}`}>
-    <div className="model-main"><ModelLogo model={model} /><div><div className="model-name"><h3>{model.name}</h3><span>by {model.maker}</span><em>{model.usage} tokens</em></div><p>{model.summary}</p><div className="model-meta-line"><div className="tag-row">{model.tags.map(t => <Tag key={t}>{t}</Tag>)}</div><span>{model.released}</span></div></div></div>
-    <div className="model-metrics"><div><small>上下文</small><b>{model.context}</b></div><div><small>输入 / 1M</small><b>${model.input.toFixed(2)}</b></div><div><small>输出 / 1M</small><b>{model.output ? `$${model.output.toFixed(2)}` : '—'}</b></div><div><small>速度</small><b>{model.speed} t/s</b></div></div>
-    <div className="model-row-actions">{onCompare&&<Tooltip title="加入比较"><button className={selected?'active':''} onClick={onCompare}><SwapOutlined/></button></Tooltip>}{onPin&&<Tooltip title="收藏"><button className={pinned?'active':''} onClick={onPin}><PushpinOutlined/></button></Tooltip>}<Link to={`/models/${model.id}`} aria-label={`查看 ${model.name}`}><ArrowRightOutlined /></Link></div>
-  </article>
-}
-
 const detailSections = ['Providers','Pricing','Performance','Uptime','Benchmarks','Apps','Activity','FAQ','Explore']
 function ModelDetailPage() {
   const { '*': path = '' } = useParams()
@@ -177,15 +131,14 @@ function ModelDetailPage() {
   </div>
 }
 
-function Metric({label,value,note}:{label:string,value:string,note:string}) { return <div className="metric"><small>{label}</small><b>{value}</b><span>{note}</span></div> }
 function DetailSection({id,title,intro,children}:{id:string,title:string,intro:string,children:React.ReactNode}) { return <section id={id} className="detail-section"><div className="section-heading"><span>{String(detailSections.indexOf(id)+1).padStart(2,'0')}</span><div><h2>{title}</h2>{intro&&<p>{intro}</p>}</div></div>{children}</section> }
 function ProviderTable({model}:{model:Model}) { return <div className="provider-table"><div className="table-head"><span>供应商</span><span>延迟</span><span>吞吐</span><span>价格</span><span>状态</span></div>{['uMaaS Edge','Azure AI','Cloudflare AI'].map((p,i)=><div key={p}><span><b>{p}</b><small>{i===0?'Auto route':'Singapore'}</small></span><span>{42+i*27}ms</span><span>{model.speed-i*31} t/s</span><span>${(model.input+i*.05).toFixed(2)}</span><span className="healthy"><i/> Healthy</span></div>)}</div> }
 
 function BenchmarksPage() {
   const [category,setCategory] = useState('全部')
-  const [selected,setSelected] = useState<null | {name:string,group:string,description:string,models:number,quality:string,value:string,speed:string,winners:string[]}>(null)
+  const [selected,setSelected] = useState<BenchmarkRecord | null>(null)
   const cats = ['全部','智能体','推理','搜索']
-  const rows = [
+  const rows: BenchmarkRecord[] = [
     {name:'τ²-Bench Airline',group:'智能体',description:'在严格策略约束下执行工具调用的多轮服务智能体。',models:121,quality:'81.5%',value:'$0.020',speed:'70s',winners:['Claude Fable 5','Step 3.7 Flash','GLM 5.3']},
     {name:'TerminalBench 2.0',group:'智能体',description:'在隔离终端环境中完成真实软件工程任务。',models:38,quality:'72.4%',value:'$0.084',speed:'94s',winners:['GPT-5.6 SOL','DeepSeek V4','Gemini 3.8 Flash']},
     {name:'GPQA Diamond',group:'推理',description:'抵抗简单检索、需要严谨推理的研究生级科学问题。',models:128,quality:'94.4%',value:'$0.029',speed:'60s',winners:['Gemini 3.8 Pro','MiniMax M3','Gemini 3.8 Flash']},
@@ -195,7 +148,7 @@ function BenchmarksPage() {
     {name:'WideSearch',group:'搜索',description:'填充完整研究表格，对部分匹配按答案项计分。',models:4,quality:'84.0%',value:'$0.063',speed:'1.9m',winners:['Perplexity + GPT-5.6 SOL','Perplexity + GPT-5.6 Luna','Perplexity + GPT-5.6 SOL']},
   ]
   const visible = rows.filter(r=>category==='全部'||r.group===category)
-  return <div className="benchmarks-page"><section className="bench-intro"><div><h1>评测榜</h1><p>对请求中真正可控的变量进行独立、可复现测量：模型、供应商、搜索引擎和工具预算。每个分数都关联其配置、成本和遥测数据。</p><div className="bench-stats"><b>7 个评测</b><span>•</span><b>2,458,279 次任务执行</b><span>•</span><span>最后运行于 2026 年 9 月 4 日</span></div></div><div className="bench-links"><button><CodeOutlined/><span><b>Benchmarks API</b><small>通过 API 获取结果与元数据</small></span><ArrowRightOutlined/></button><button><AppstoreOutlined/><span><b>媒体评测</b><small>比较多媒体模型生成质量</small></span><ArrowRightOutlined/></button></div></section><div className="benchmark-tabs">{cats.map((x,i)=><button className={category===x?'active':''} onClick={()=>setCategory(x)} key={x}><span>{['◎','▣','△','⊕'][i]}</span>{x}</button>)}</div>{['智能体','推理','搜索'].map(group => {const groupRows=visible.filter(r=>r.group===group);if(!groupRows.length)return null;return <section className="benchmark-section" key={group}><h2><span>{group==='智能体'?'▣':group==='推理'?'△':'⊕'}</span>{group}{group==='智能体'?'与工具':''}</h2><div className="benchmark-table"><div className="benchmark-table-head"><span>BENCHMARK</span><span>♜ QUALITY</span><span>♧ VALUE</span><span>ϟ SPEED</span></div>{groupRows.map(row=><button className="benchmark-record" key={row.name} onClick={()=>setSelected(row)}><span className="benchmark-info"><b>{row.name} <em>›</em></b><small>{row.description}</small><i>{row.models} 个模型　·　最后运行于 Sep {row.group==='搜索'?'18':'4'}, 2026</i></span>{[['quality',row.quality,row.winners[0]],['value',row.value,row.winners[1]],['speed',row.speed,row.winners[2]]].map(([kind,value,winner])=><span className="benchmark-result" key={kind}><strong>{value}</strong><small><ModelLogo model={models[(row.winners.indexOf(winner)+group.length)%models.length]}/>{winner}</small></span>)}</button>)}</div></section>})}<p className="bench-footnote">需要相同模型的使用量视图？前往 <Link to="/rankings">模型排行榜</Link> 或 <Link to="/models">完整模型列表</Link>。</p><Drawer open={!!selected} onClose={()=>setSelected(null)} width={520} title={selected?.name}>{selected&&<div className="benchmark-detail"><p>{selected.description}</p><div><Metric label="最佳质量" value={selected.quality} note={selected.winners[0]}/><Metric label="最佳价值" value={selected.value} note={selected.winners[1]}/><Metric label="最快完成" value={selected.speed} note={selected.winners[2]}/></div><h3>评测配置</h3><pre>{JSON.stringify({dataset:selected.name,models:selected.models,repetitions:3,temperature:0,telemetry:true},null,2)}</pre><Button type="primary" block>查看完整结果与遥测</Button></div>}</Drawer></div>
+  return <div className="benchmarks-page"><section className="bench-intro"><div><h1>评测榜</h1><p>对请求中真正可控的变量进行独立、可复现测量：模型、供应商、搜索引擎和工具预算。每个分数都关联其配置、成本和遥测数据。</p><div className="bench-stats"><b>7 个评测</b><span>•</span><b>2,458,279 次任务执行</b><span>•</span><span>最后运行于 2026 年 9 月 4 日</span></div></div><div className="bench-links"><button><CodeOutlined/><span><b>Benchmarks API</b><small>通过 API 获取结果与元数据</small></span><ArrowRightOutlined/></button><button><AppstoreOutlined/><span><b>媒体评测</b><small>比较多媒体模型生成质量</small></span><ArrowRightOutlined/></button></div></section><div className="benchmark-tabs">{cats.map((x,i)=><button className={category===x?'active':''} onClick={()=>setCategory(x)} key={x}><span>{['◎','▣','△','⊕'][i]}</span>{x}</button>)}</div>{['智能体','推理','搜索'].map(group => {const groupRows=visible.filter(r=>r.group===group);if(!groupRows.length)return null;return <section className="benchmark-section" key={group}><h2><span>{group==='智能体'?'▣':group==='推理'?'△':'⊕'}</span>{group}{group==='智能体'?'与工具':''}</h2><BenchmarkTable rows={groupRows} models={models} onSelect={setSelected}/></section>})}<p className="bench-footnote">需要相同模型的使用量视图？前往 <Link to="/rankings">模型排行榜</Link> 或 <Link to="/models">完整模型列表</Link>。</p><Drawer open={!!selected} onClose={()=>setSelected(null)} width={520} title={selected?.name}>{selected&&<div className="benchmark-detail"><p>{selected.description}</p><div><Metric label="最佳质量" value={selected.quality} note={selected.winners[0]}/><Metric label="最佳价值" value={selected.value} note={selected.winners[1]}/><Metric label="最快完成" value={selected.speed} note={selected.winners[2]}/></div><h3>评测配置</h3><pre>{JSON.stringify({dataset:selected.name,models:selected.models,repetitions:3,temperature:0,telemetry:true},null,2)}</pre><Button type="primary" block>查看完整结果与遥测</Button></div>}</Drawer></div>
 }
 
 function RankingsPage() {
@@ -204,10 +157,10 @@ function RankingsPage() {
   const [modality,setModality] = useState('文本')
   const [scale,setScale] = useState('线性')
   const [unit,setUnit] = useState('绝对值')
-  const usageData = ['09/08','10/20','12/01','01/12','02/23','04/06','05/18','06/29','08/10','09/01'].map((date,i)=>({date, openai:8+i*i*1.5, google:5+i*3, anthropic:4+i*2.2, deepseek:3+i*2.8, others:6+i*4}))
+  const usageData: UsageDatum[] = ['09/08','10/20','12/01','01/12','02/23','04/06','05/18','06/29','08/10','09/01'].map((date,i)=>({date, openai:8+i*i*1.5, google:5+i*3, anthropic:4+i*2.2, deepseek:3+i*2.8, others:6+i*4}))
   const modalities = ['文本','图像','嵌入','重排','视频','语音','转录','批处理']
   const sectionId = (name:string) => `rank-${name.toLowerCase().replaceAll(' ','-')}`
-  const insightSections = [
+  const insightSections: RankingInsightData[] = [
     {name:'Top models by task',title:'按任务排名',description:'开发者在不同任务中实际选择的模型',labels:['编程','角色扮演','市场营销','科研'],values:['Claude Opus 5','MiniMax M3','Gemini 3.8 Flash','GPT-5.6 SOL']},
     {name:'Cost per session',title:'单次会话成本',description:'按完整会话计算的中位推理成本',labels:['GPT-5.6 SOL','Claude Opus 5','Gemini 3.8 Flash','DeepSeek V4'],values:['$0.84','$0.72','$0.21','$0.09']},
     {name:'Market Share',title:'模型厂商市场份额',description:'按处理 tokens 统计的厂商份额',labels:['OpenAI','Google','Anthropic','DeepSeek'],values:['31.8%','26.4%','21.2%','12.7%']},
@@ -226,9 +179,9 @@ function RankingsPage() {
       <aside className="rank-nav"><span className="side-label">RANKINGS</span>{rankSections.map((s,i)=><button key={s} onClick={()=>{setActive(s);document.getElementById(sectionId(s))?.scrollIntoView({behavior:'smooth',block:'start'})}} className={active===s?'active':''}><span>{String(i+1).padStart(2,'0')}</span>{s}</button>)}</aside>
       <div className="rank-content">
         <section className="ranking-intro"><h1>AI 模型排行榜</h1><p>基于真实调用量的实时模型排名。数据来自 uMaaS API 中匿名聚合的 tokens，不代表模型质量。</p><span>数据更新至 2026 年 9 月 4 日</span></section>
-        <section id={sectionId('Top Models')} className="usage-chart-section rank-scroll-section"><div className="rank-section-title"><div><h2>Top Models</h2><p>{modality}模型在 uMaaS 上的每周使用量</p></div><Segmented size="small" value={scale} onChange={setScale} options={['线性','对数']}/></div><div className="stacked-chart"><ResponsiveContainer width="100%" height={390}><AreaChart data={usageData} margin={{left:4,right:10,top:20}}><CartesianGrid vertical={false} stroke="#ececf0"/><XAxis dataKey="date" tick={{fontSize:11}} axisLine={false}/><YAxis scale={scale==='对数'?'log':'auto'} domain={scale==='对数'?[1,'auto']:[0,'auto']} tick={{fontSize:11}} axisLine={false} tickFormatter={v=>`${Math.round(v)}T`}/><ChartTooltip/><Area stackId="1" dataKey="openai" stroke="#f05aa8" fill="#f05aa8" isAnimationActive={false}/><Area stackId="1" dataKey="google" stroke="#7c4dff" fill="#7c4dff" isAnimationActive={false}/><Area stackId="1" dataKey="anthropic" stroke="#23b5d3" fill="#23b5d3" isAnimationActive={false}/><Area stackId="1" dataKey="deepseek" stroke="#8dc63f" fill="#8dc63f" isAnimationActive={false}/><Area stackId="1" dataKey="others" stroke="#ff9947" fill="#ff9947" isAnimationActive={false}/></AreaChart></ResponsiveContainer></div><div className="chart-legend"><span><i style={{background:'#f05aa8'}}/>OpenAI</span><span><i style={{background:'#7c4dff'}}/>Google</span><span><i style={{background:'#23b5d3'}}/>Anthropic</span><span><i style={{background:'#8dc63f'}}/>DeepSeek</span><span><i style={{background:'#ff9947'}}/>其他</span></div></section>
-        <section id={sectionId('Leaderboard')} className="ranking-board rank-scroll-section"><div className="rank-section-title"><div><h2>LLM Leaderboard</h2><p>比较 uMaaS 上最常用的{modality}模型</p></div><div className="rank-selectors"><Select defaultValue="全部模型" options={[{value:'全部模型',label:'全部模型'},{value:'开源模型',label:'开源模型'}]}/><Select value={period} onChange={setPeriod} options={['今天','本周','本月','增长最快'].map(value=>({value,label:value}))}/><Segmented size="small" value={unit} onChange={setUnit} options={['绝对值','百分比']}/></div></div><div className="leader-columns">{models.map((m,i)=><Link to={`/models/${m.id}`} key={m.id} className="rank-entry"><strong>{i+1}.</strong><ModelLogo model={m}/><span><b>{m.name}</b><small>by {m.maker}</small></span><em>{unit==='绝对值'?`${(13.6-i*1.31).toFixed(1)}T tokens`:`${(24-i*2.1).toFixed(1)}%`}<small className={i===3?'down':''}>{i===3?'↓ 4%':`↑ ${Math.max(3,273-i*31)}%`}</small></em></Link>)}</div><Button block className="show-more">显示更多</Button></section>
-        <div className="ranking-insights">{insightSections.map((section,index)=><section id={sectionId(section.name)} className="rank-insight rank-scroll-section" key={section.name}><div className="rank-section-title"><div><h2>{section.title}</h2><p>{section.description}</p></div><Segmented size="small" defaultValue="绝对值" options={['绝对值','百分比']}/></div><div className="insight-body"><div className="insight-bars">{section.labels.map((label,i)=><div key={label}><span><b>{label}</b><em>{section.values[i]}</em></span><i><u style={{width:`${92-i*17}%`,background:['#7c3cff','#f05aa8','#23b5d3','#8dc63f'][i]}}/></i></div>)}</div><div className="insight-summary"><span>{String(index+3).padStart(2,'0')}</span><b>{section.values[0]}</b><small>当前领先</small><p>基于过去 7 个完整 UTC 日的匿名聚合数据。</p></div></div></section>)}</div>
+        <section id={sectionId('Top Models')} className="usage-chart-section rank-scroll-section"><AnalyticsSectionHeader title="Top Models" description={`${modality}模型在 uMaaS 上的每周使用量`} actions={<Segmented size="small" value={scale} onChange={setScale} options={['线性','对数']}/>}/><AnalyticsStatStrip items={[{label:'本周总量',value:'281.4T',change:'↑ 18.6%',tone:'positive'},{label:'增长最快',value:'OpenAI',change:'↑ 42.1%',tone:'positive'},{label:'活跃模型',value:'437',change:'+19 本周',tone:'neutral'}]}/><UsageTrendChart data={usageData} scale={scale as '线性'|'对数'}/></section>
+        <section id={sectionId('Leaderboard')} className="ranking-board rank-scroll-section"><AnalyticsSectionHeader title="LLM Leaderboard" description={`比较 uMaaS 上最常用的${modality}模型`} actions={<div className="rank-selectors"><Select defaultValue="全部模型" options={[{value:'全部模型',label:'全部模型'},{value:'开源模型',label:'开源模型'}]}/><Select value={period} onChange={setPeriod} options={['今天','本周','本月','增长最快'].map(value=>({value,label:value}))}/><Segmented size="small" value={unit} onChange={setUnit} options={['绝对值','百分比']}/></div>}/><RankingLeaderboard models={models} unit={unit}/><Button block className="show-more">显示更多</Button></section>
+        <div className="ranking-insights">{insightSections.map((section,index)=><RankingInsight id={sectionId(section.name)} index={index} data={section} key={section.name}/>)}</div>
         <section className="ranking-note"><h2>如何理解这些排名</h2><p>排名统计提示词与补全 tokens，并按 UTC 日聚合。它反映 uMaaS 网络中的采用度，而不是准确率、推理能力或整个市场份额。私密应用的请求不会进入统计。</p></section>
       </div>
     </div>
@@ -240,7 +193,6 @@ const codeSamples = {
   python: `from openai import OpenAI\n\nclient = OpenAI(\n    base_url="https://api.umaas.dev/v1",\n    api_key="YOUR_UMAAS_API_KEY",\n)\n\nresponse = client.chat.completions.create(\n    model="google/gemini-3.8-flash",\n    messages=[{"role": "user", "content": "Hello"}],\n)`,
   node: `import OpenAI from "openai";\n\nconst client = new OpenAI({\n  baseURL: "https://api.umaas.dev/v1",\n  apiKey: process.env.UMAAS_API_KEY,\n});\n\nconst result = await client.chat.completions.create({\n  model: "google/gemini-3.8-flash",\n  messages: [{ role: "user", content: "Hello" }],\n});`,
 }
-function CopyCode({code}:{code:string}) { const [api,ctx]=message.useMessage(); return <>{ctx}<Button className="copy-code" icon={<CopyOutlined/>} onClick={()=>{navigator.clipboard.writeText(code);api.success('已复制')}}>复制</Button></> }
 function DocsPage() {
   const [lang,setLang]=useState<keyof typeof codeSamples>('curl')
   const [doc,setDoc]=useState('快速开始')
@@ -271,6 +223,9 @@ function HarnessPage() {
 function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   const isSignup = mode === 'signup'
   const navigate = useNavigate()
+  const location = useLocation()
+  const { login, authenticated } = useAuth()
+  const redirectTo = (location.state as { from?: string } | null)?.from || '/console'
   const [api, contextHolder] = message.useMessage()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -284,7 +239,7 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
     const configuredUrl = provider === 'GitHub' ? import.meta.env.VITE_GITHUB_OAUTH_URL : import.meta.env.VITE_GOOGLE_OAUTH_URL
     if (configuredUrl) {
       const target = new URL(configuredUrl, window.location.origin)
-      target.searchParams.set('return_to', `${window.location.origin}/models`)
+      target.searchParams.set('return_to', `${window.location.origin}${redirectTo}`)
       target.searchParams.set('mode', mode)
       window.location.assign(target.toString())
       return
@@ -306,14 +261,16 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
     window.setTimeout(() => {
       setLoading(null)
       api.success(isSignup ? '账户信息验证通过' : '登录信息验证通过')
-      navigate('/models')
+      login({ name: isSignup ? name.trim() : email.split('@')[0], email, workspace: 'Acme AI' }, isSignup || remember)
+      navigate(redirectTo, { replace: true })
     }, 850)
   }
+  if (authenticated) return <Navigate to={redirectTo} replace />
   return <div className="auth-page">{contextHolder}<section className="auth-context"><Brand/><div><span className="auth-kicker">uMaaS IDENTITY</span><h1>{isSignup ? '连接每一个模型，\n只需要一个账户。' : '欢迎回到\nuMaaS。'}</h1><p>{isSignup ? '创建工作空间，统一管理模型、供应商、密钥、预算与团队权限。' : '继续管理你的模型路由、评测数据和生产工作流。'}</p><ul><li><CheckCircleFilled/> 一个 API Key 调用全部模型</li><li><CheckCircleFilled/> 团队预算与细粒度权限</li><li><CheckCircleFilled/> 请求数据默认不用于训练</li></ul></div><div className="auth-trust"><SafetyCertificateOutlined/><span><b>企业级安全</b><small>传输加密 · 密钥隔离 · 审计日志</small></span></div></section><section className="auth-form-wrap"><div className="auth-form-head"><span>{isSignup ? '已有账户？' : '还没有账户？'}</span><Link to={isSignup ? '/login' : '/signup'}>{isSignup ? '登录' : '免费注册'} <ArrowRightOutlined/></Link></div><form className="auth-form" onSubmit={submit} noValidate><div className="auth-title"><span>{isSignup ? 'CREATE ACCOUNT' : 'WELCOME BACK'}</span><h2>{isSignup ? '创建 uMaaS 账户' : '登录你的账户'}</h2><p>{isSignup ? '免费开始，无需信用卡。' : '输入账户信息，或使用第三方账户继续。'}</p></div><div className="oauth-grid"><Button size="large" icon={<GithubOutlined/>} loading={loading==='GitHub'} onClick={()=>oauth('GitHub')}>使用 GitHub {isSignup?'注册':'登录'}</Button><Button size="large" icon={<GoogleOutlined/>} loading={loading==='Google'} onClick={()=>oauth('Google')}>使用 Google {isSignup?'注册':'登录'}</Button></div><div className="auth-divider"><span>或使用邮箱</span></div>{isSignup&&<label className="auth-field"><span>姓名</span><Input size="large" value={name} onChange={e=>setName(e.target.value)} placeholder="你的姓名" autoComplete="name"/></label>}<label className="auth-field"><span>工作邮箱</span><Input size="large" prefix={<MailOutlined/>} value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@company.com" autoComplete="email"/></label><label className="auth-field"><span>密码 {!isSignup&&<button type="button" onClick={()=>api.info('密码重置链接将发送到注册邮箱')}>忘记密码？</button>}</span><Input.Password size="large" prefix={<LockOutlined/>} value={password} onChange={e=>setPassword(e.target.value)} placeholder={isSignup?'至少 8 个字符':'输入密码'} autoComplete={isSignup?'new-password':'current-password'}/>{isSignup&&<div className="password-strength"><i className={passwordScore>0?'active':''}/><i className={passwordScore>1?'active':''}/><i className={passwordScore>2?'active':''}/><span>{passwordScore<2?'密码强度较弱':passwordScore===2?'密码强度良好':'密码强度很强'}</span></div>}</label>{isSignup?<label className="auth-check"><input type="checkbox" checked={agree} onChange={e=>setAgree(e.target.checked)}/><span>我同意 <a href="#terms">服务条款</a> 和 <a href="#privacy">隐私政策</a></span></label>:<label className="auth-check"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/><span>在此设备上保持登录</span></label>}{error&&<div className="auth-error" role="alert">{error}</div>}<Button type="primary" htmlType="submit" size="large" block loading={loading==='email'}>{isSignup?'创建账户':'登录'} <ArrowRightOutlined/></Button><p className="auth-note">继续即表示你理解第三方登录将共享基础账户信息。</p></form></section></div>
 }
 
 function NotFound() { return <div className="not-found"><span>404</span><h1>页面不存在</h1><Link to="/">返回首页</Link></div> }
 
 export default function App() {
-  return <ConfigProvider theme={{token:{colorPrimary:'#7c3cff',colorLink:'#6d2ee9',borderRadius:6,fontFamily:'Inter, "PingFang SC", "Microsoft YaHei", sans-serif',colorText:'#171719',colorBorder:'#dedee5'},components:{Button:{primaryShadow:'none'},Input:{activeShadow:'0 0 0 2px rgba(124,60,255,.12)'},Select:{activeOutlineColor:'rgba(124,60,255,.12)'}}}}><Shell><Routes><Route path="/" element={<HomePage/>}/><Route path="/models" element={<ModelsPage/>}/><Route path="/models/*" element={<ModelDetailPage/>}/><Route path="/benchmarks" element={<BenchmarksPage/>}/><Route path="/rankings" element={<RankingsPage/>}/><Route path="/docs/*" element={<DocsPage/>}/><Route path="/harness" element={<HarnessPage/>}/><Route path="/login" element={<AuthPage mode="login"/>}/><Route path="/signup" element={<AuthPage mode="signup"/>}/><Route path="*" element={<NotFound/>}/></Routes></Shell></ConfigProvider>
+  return <ConfigProvider theme={appTheme}><AppShell><Routes><Route path="/" element={<HomePage/>}/><Route path="/models" element={<ModelsPage/>}/><Route path="/models/*" element={<ModelDetailPage/>}/><Route path="/benchmarks" element={<BenchmarksPage/>}/><Route path="/rankings" element={<RankingsPage/>}/><Route path="/docs/*" element={<DocsPage/>}/><Route path="/harness" element={<HarnessPage/>}/><Route path="/console/*" element={<RequireAuth><ConsolePage/></RequireAuth>}/><Route path="/login" element={<AuthPage mode="login"/>}/><Route path="/signup" element={<AuthPage mode="signup"/>}/><Route path="*" element={<NotFound/>}/></Routes></AppShell></ConfigProvider>
 }

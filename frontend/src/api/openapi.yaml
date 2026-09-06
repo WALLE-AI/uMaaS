@@ -1,0 +1,839 @@
+openapi: 3.1.0
+info:
+  title: uMaaS Product API
+  version: 0.1.0
+  description: Control-plane API for the uMaaS web product. The OpenAI-compatible inference API is documented separately.
+servers:
+  - url: https://api.umaas.dev/api/v1
+    description: Production
+  - url: http://127.0.0.1:8080/api/v1
+    description: Local development
+tags:
+  - name: Catalog
+  - name: Models
+  - name: Benchmarks
+  - name: Rankings
+  - name: Docs
+  - name: Harnesses
+  - name: Auth
+
+paths:
+  /catalog/summary:
+    get:
+      tags: [Catalog]
+      operationId: getCatalogSummary
+      summary: Get homepage catalog and platform metrics
+      responses:
+        '200':
+          description: Catalog summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogSummaryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /models:
+    get:
+      tags: [Models]
+      operationId: listModels
+      summary: Search, filter, sort, and paginate models
+      parameters:
+        - $ref: '#/components/parameters/Search'
+        - name: provider
+          in: query
+          schema: { type: string }
+        - name: modality
+          in: query
+          description: Repeat this query key to select multiple modalities.
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/ModelModality' }
+          style: form
+          explode: true
+        - name: capability
+          in: query
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+        - name: min_context_length
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: max_input_price
+          in: query
+          schema: { type: number, minimum: 0 }
+        - name: zero_data_retention
+          in: query
+          schema: { type: boolean }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [released_at, price, throughput, usage], default: released_at }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Model page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    required: [data, meta]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ModelSummary' }
+                      meta: { $ref: '#/components/schemas/PageMeta' }
+        default:
+          $ref: '#/components/responses/Error'
+
+  /models/{provider}/{model}:
+    get:
+      tags: [Models]
+      operationId: getModel
+      summary: Get all sections required by the model detail page
+      parameters:
+        - $ref: '#/components/parameters/ModelProvider'
+        - $ref: '#/components/parameters/ModelSlug'
+      responses:
+        '200':
+          description: Model detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelDetail' }
+        default:
+          $ref: '#/components/responses/Error'
+
+  /me/favorites:
+    get:
+      tags: [Models]
+      operationId: listFavoriteModels
+      security: [{ cookieSession: [] }]
+      responses:
+        '200':
+          description: Favorite models
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ModelSummary' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /me/favorites/{provider}/{model}:
+    parameters:
+      - $ref: '#/components/parameters/ModelProvider'
+      - $ref: '#/components/parameters/ModelSlug'
+    put:
+      tags: [Models]
+      operationId: favoriteModel
+      security: [{ cookieSession: [] }]
+      responses:
+        '204': { description: Favorite saved }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Models]
+      operationId: unfavoriteModel
+      security: [{ cookieSession: [] }]
+      responses:
+        '204': { description: Favorite removed }
+        default: { $ref: '#/components/responses/Error' }
+
+  /benchmarks:
+    get:
+      tags: [Benchmarks]
+      operationId: listBenchmarks
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string, enum: [agent, reasoning, search, coding, multimodal] }
+      responses:
+        '200':
+          description: Benchmark summaries and metric winners
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/BenchmarkSummary' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /benchmarks/{slug}:
+    get:
+      tags: [Benchmarks]
+      operationId: getBenchmark
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Benchmark configuration, result rows, cost, and telemetry summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/BenchmarkDetail' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /rankings:
+    get:
+      tags: [Rankings]
+      operationId: getRanking
+      parameters:
+        - name: dimension
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/RankingDimension' }
+        - name: modality
+          in: query
+          schema: { $ref: '#/components/schemas/ModelModality' }
+        - name: period
+          in: query
+          schema: { type: string, enum: [day, week, month], default: week }
+        - name: unit
+          in: query
+          schema: { type: string, enum: [absolute, percentage], default: absolute }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, open-source], default: all }
+      responses:
+        '200':
+          description: Entries and optional chart series for one ranking dimension
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/RankingResponse' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /docs/navigation:
+    get:
+      tags: [Docs]
+      operationId: getDocsNavigation
+      responses:
+        '200':
+          description: Grouped documentation navigation
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/DocsNavigationGroup' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /docs/search:
+    get:
+      tags: [Docs]
+      operationId: searchDocs
+      parameters:
+        - $ref: '#/components/parameters/SearchRequired'
+      responses:
+        '200':
+          description: Documentation search matches
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/DocsSearchResult' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /docs/{slug}:
+    get:
+      tags: [Docs]
+      operationId: getDocsPage
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Markdown article and generated table of contents
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DocsPage' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /harnesses:
+    get:
+      tags: [Harnesses]
+      operationId: listHarnesses
+      responses:
+        '200':
+          description: Supported agent harnesses
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/HarnessDefinition' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /harnesses/config:
+    post:
+      tags: [Harnesses]
+      operationId: generateHarnessConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HarnessConfigRequest' }
+      responses:
+        '200':
+          description: Generated command and configuration preview
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/HarnessConfigResponse' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /harnesses/waitlist:
+    post:
+      tags: [Harnesses]
+      operationId: joinHarnessWaitlist
+      security: [{ cookieSession: [] }]
+      responses:
+        '200': { description: User joined the waitlist }
+        default: { $ref: '#/components/responses/Error' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Session cookie created
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSessionResponse' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account and session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSessionResponse' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /auth/session:
+    get:
+      tags: [Auth]
+      operationId: getSession
+      security: [{ cookieSession: [] }]
+      responses:
+        '200':
+          description: Current browser session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSessionResponse' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      security: [{ cookieSession: [] }]
+      responses:
+        '204': { description: Session revoked }
+        default: { $ref: '#/components/responses/Error' }
+
+  /auth/password/reset-request:
+    post:
+      tags: [Auth]
+      operationId: requestPasswordReset
+      summary: Request a reset email without revealing account existence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '204': { description: Request accepted whether or not the account exists }
+        default: { $ref: '#/components/responses/Error' }
+
+  /me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      security: [{ cookieSession: [] }]
+      responses:
+        '200':
+          description: Current user and workspace membership
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/User' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /auth/oauth/{provider}:
+    get:
+      tags: [Auth]
+      operationId: startOAuth
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [github, google] }
+        - name: mode
+          in: query
+          required: true
+          schema: { type: string, enum: [login, signup] }
+        - name: return_to
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+      responses:
+        '302': { description: Redirect to provider authorization endpoint }
+        default: { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: umaas_session
+
+  parameters:
+    ModelProvider:
+      name: provider
+      in: path
+      required: true
+      schema: { type: string, example: google }
+    ModelSlug:
+      name: model
+      in: path
+      required: true
+      schema: { type: string, example: gemini-3.8-flash }
+    Search:
+      name: q
+      in: query
+      schema: { type: string, maxLength: 200 }
+    SearchRequired:
+      name: q
+      in: query
+      required: true
+      schema: { type: string, minLength: 2, maxLength: 200 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    Error:
+      description: Standard API error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    BaseResponse:
+      type: object
+      required: [request_id]
+      properties:
+        request_id: { type: string }
+    PageMeta:
+      type: object
+      required: [next_cursor]
+      properties:
+        next_cursor: { type: [string, 'null'] }
+        total: { type: integer, minimum: 0 }
+    ErrorResponse:
+      type: object
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            field: { type: string }
+            details: { type: object, additionalProperties: true }
+        request_id: { type: string }
+    ModelModality:
+      type: string
+      enum: [text, image, video, audio, embedding, rerank]
+    ProviderSummary:
+      type: object
+      required: [id, name, slug, logo_url, model_count]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        logo_url: { type: string, format: uri-reference }
+        model_count: { type: integer, minimum: 0 }
+    ModelSummary:
+      type: object
+      required: [id, slug, name, provider, description, logo_url, modalities, capabilities, pricing, performance, usage_tokens_30d, released_at]
+      properties:
+        id: { type: string, example: google/gemini-3.8-flash }
+        slug: { type: string, example: gemini-3.8-flash }
+        name: { type: string }
+        provider: { $ref: '#/components/schemas/ProviderSummary' }
+        description: { type: string }
+        logo_url: { type: string, format: uri-reference }
+        modalities:
+          type: array
+          items: { $ref: '#/components/schemas/ModelModality' }
+        capabilities:
+          type: array
+          items: { type: string }
+        context_length: { type: [integer, 'null'], minimum: 1 }
+        pricing:
+          type: object
+          required: [currency, input_per_million, output_per_million]
+          properties:
+            currency: { type: string, const: USD }
+            input_per_million: { type: [number, 'null'], minimum: 0 }
+            output_per_million: { type: [number, 'null'], minimum: 0 }
+        performance:
+          type: object
+          required: [throughput_tokens_per_second, quality_score]
+          properties:
+            throughput_tokens_per_second: { type: [number, 'null'], minimum: 0 }
+            quality_score: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        usage_tokens_30d: { type: integer, minimum: 0 }
+        released_at: { type: string, format: date-time }
+    ModelEndpoint:
+      type: object
+      required: [id, provider, region, latency_ms_p50, latency_ms_p95, throughput_tokens_per_second, uptime_30d, status, supports_zero_data_retention]
+      properties:
+        id: { type: string }
+        provider: { $ref: '#/components/schemas/ProviderSummary' }
+        region: { type: string }
+        latency_ms_p50: { type: number, minimum: 0 }
+        latency_ms_p95: { type: number, minimum: 0 }
+        throughput_tokens_per_second: { type: number, minimum: 0 }
+        input_per_million: { type: [number, 'null'], minimum: 0 }
+        output_per_million: { type: [number, 'null'], minimum: 0 }
+        uptime_30d: { type: number, minimum: 0, maximum: 1 }
+        status: { type: string, enum: [healthy, degraded, offline] }
+        supports_zero_data_retention: { type: boolean }
+    TimeSeriesPoint:
+      type: object
+      required: [timestamp, value]
+      properties:
+        timestamp: { type: string, format: date-time }
+        value: { type: number }
+    ModelDetail:
+      allOf:
+        - $ref: '#/components/schemas/ModelSummary'
+        - type: object
+          required: [input_formats, output_formats, supported_parameters, endpoints, uptime, benchmark_scores, top_apps, recent_activity, faq, related_models]
+          properties:
+            architecture: { type: [string, 'null'] }
+            input_formats: { type: array, items: { type: string } }
+            output_formats: { type: array, items: { type: string } }
+            supported_parameters: { type: array, items: { type: string } }
+            endpoints: { type: array, items: { $ref: '#/components/schemas/ModelEndpoint' } }
+            uptime: { type: array, items: { $ref: '#/components/schemas/TimeSeriesPoint' } }
+            benchmark_scores: { type: array, items: { $ref: '#/components/schemas/BenchmarkScore' } }
+            top_apps: { type: array, items: { $ref: '#/components/schemas/AppUsage' } }
+            recent_activity: { type: array, items: { $ref: '#/components/schemas/ActivityItem' } }
+            faq: { type: array, items: { $ref: '#/components/schemas/FaqItem' } }
+            related_models: { type: array, items: { $ref: '#/components/schemas/ModelSummary' } }
+    CatalogSummaryResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [model_count, provider_count, monthly_tokens, gateway_latency_ms_p50, featured_models, updated_at]
+              properties:
+                model_count: { type: integer, minimum: 0 }
+                provider_count: { type: integer, minimum: 0 }
+                monthly_tokens: { type: integer, minimum: 0 }
+                gateway_latency_ms_p50: { type: number, minimum: 0 }
+                featured_models: { type: array, items: { $ref: '#/components/schemas/ModelSummary' } }
+                updated_at: { type: string, format: date-time }
+    BenchmarkMetricWinner:
+      type: object
+      required: [model, value, display_value]
+      properties:
+        model: { $ref: '#/components/schemas/ModelSummary' }
+        value: { type: number }
+        display_value: { type: string }
+    BenchmarkSummary:
+      type: object
+      required: [id, slug, name, category, description, evaluated_model_count, run_count, last_run_at, winners]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        category: { type: string, enum: [agent, reasoning, search, coding, multimodal] }
+        description: { type: string }
+        evaluated_model_count: { type: integer, minimum: 0 }
+        run_count: { type: integer, minimum: 0 }
+        last_run_at: { type: string, format: date-time }
+        winners:
+          type: object
+          required: [quality, value, speed]
+          properties:
+            quality: { $ref: '#/components/schemas/BenchmarkMetricWinner' }
+            value: { $ref: '#/components/schemas/BenchmarkMetricWinner' }
+            speed: { $ref: '#/components/schemas/BenchmarkMetricWinner' }
+    BenchmarkScore:
+      type: object
+      required: [benchmark_id, benchmark_name, score]
+      properties:
+        benchmark_id: { type: string }
+        benchmark_name: { type: string }
+        score: { type: number }
+        percentile: { type: number, minimum: 0, maximum: 100 }
+    BenchmarkDetail:
+      allOf:
+        - $ref: '#/components/schemas/BenchmarkSummary'
+        - type: object
+          required: [methodology, configuration, results]
+          properties:
+            methodology: { type: string }
+            configuration: { type: object, additionalProperties: true }
+            results:
+              type: array
+              items:
+                type: object
+                required: [rank, model, score, cost_usd, duration_ms, sample_count]
+                properties:
+                  rank: { type: integer, minimum: 1 }
+                  model: { $ref: '#/components/schemas/ModelSummary' }
+                  score: { type: number }
+                  cost_usd: { type: number, minimum: 0 }
+                  duration_ms: { type: number, minimum: 0 }
+                  sample_count: { type: integer, minimum: 1 }
+    RankingDimension:
+      type: string
+      enum: [top-models, leaderboard, task, session-cost, market-share, benchmarks, speed, languages, programming, context-length, tool-calls, images, apps]
+    RankingResponse:
+      type: object
+      required: [dimension, title, description, entries, updated_at]
+      properties:
+        dimension: { $ref: '#/components/schemas/RankingDimension' }
+        title: { type: string }
+        description: { type: string }
+        entries:
+          type: array
+          items:
+            type: object
+            required: [rank, key, label, value, display_value]
+            properties:
+              rank: { type: integer, minimum: 1 }
+              key: { type: string }
+              label: { type: string }
+              value: { type: number }
+              display_value: { type: string }
+              change_percent: { type: [number, 'null'] }
+              model: { $ref: '#/components/schemas/ModelSummary' }
+        series:
+          type: array
+          items:
+            type: object
+            required: [key, label, points]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              points: { type: array, items: { $ref: '#/components/schemas/TimeSeriesPoint' } }
+        updated_at: { type: string, format: date-time }
+    DocsNavigationGroup:
+      type: object
+      required: [title, items]
+      properties:
+        title: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [slug, title]
+            properties:
+              slug: { type: string }
+              title: { type: string }
+              badge: { type: string }
+    DocsSearchResult:
+      type: object
+      required: [slug, title, excerpt]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        excerpt: { type: string }
+    DocsPage:
+      type: object
+      required: [slug, title, description, body_markdown, table_of_contents, updated_at]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        description: { type: string }
+        body_markdown: { type: string }
+        table_of_contents:
+          type: array
+          items:
+            type: object
+            required: [id, title, level]
+            properties:
+              id: { type: string }
+              title: { type: string }
+              level: { type: integer, minimum: 1, maximum: 6 }
+        updated_at: { type: string, format: date-time }
+    HarnessDefinition:
+      type: object
+      required: [id, name, description, install_template, supports_fallback]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        install_template: { type: string }
+        supports_fallback: { type: boolean }
+    HarnessConfigRequest:
+      type: object
+      required: [harness_id, model_id, daily_budget_usd, fallback_enabled]
+      properties:
+        harness_id: { type: string }
+        model_id: { type: string }
+        daily_budget_usd: { type: number, minimum: 1, maximum: 10000 }
+        fallback_enabled: { type: boolean }
+    HarnessConfigResponse:
+      type: object
+      required: [install_command, filename, configuration]
+      properties:
+        install_command: { type: string }
+        filename: { type: string }
+        configuration: { type: object, additionalProperties: true }
+    AppUsage:
+      type: object
+      required: [id, name, usage_tokens]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        logo_url: { type: string, format: uri-reference }
+        usage_tokens: { type: integer, minimum: 0 }
+    ActivityItem:
+      type: object
+      required: [id, type, title, occurred_at]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [status, pricing, release, routing] }
+        title: { type: string }
+        occurred_at: { type: string, format: date-time }
+    FaqItem:
+      type: object
+      required: [question, answer]
+      properties:
+        question: { type: string }
+        answer: { type: string }
+    User:
+      type: object
+      required: [id, name, email, workspace_id]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        avatar_url: { type: string, format: uri-reference }
+        workspace_id: { type: string }
+    LoginRequest:
+      type: object
+      required: [email, password, remember]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        remember: { type: boolean }
+    RegisterRequest:
+      type: object
+      required: [name, email, password, accepted_terms]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        accepted_terms: { type: boolean, const: true }
+    AuthSessionResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [user, expires_at]
+              properties:
+                user: { $ref: '#/components/schemas/User' }
+                expires_at: { type: string, format: date-time }
