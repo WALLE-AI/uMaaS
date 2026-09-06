@@ -1,0 +1,23 @@
+node_modules/
+dist/
+build/
+
+.env
+.env.*
+!.env.example
+
+*.local
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
+
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# 第三方参考项目：new-api / sub2api 各自是独立的 git 仓库，
+# 仅作阅读参考，不是本仓库的产物。约 255MB / 6000+ 文件，
+# 提交进来会污染历史且 gitlink 行为诡异。需要的人自行 clone。
+opensource/

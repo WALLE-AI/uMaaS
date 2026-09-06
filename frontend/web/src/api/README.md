@@ -7,7 +7,7 @@ This directory defines the product control-plane API consumed by the React appli
 | Product control plane | `/api/v1` | Catalog, analytics, docs, harness configuration, identity |
 | Model inference data plane | `https://api.umaas.dev/v1` | Chat completions and future embeddings, images, audio, and responses APIs |
 
-`openapi.yaml` is the backend-facing HTTP contract. `contracts.ts` and `services.ts` are the frontend-facing types and endpoint functions.
+The backend-facing HTTP contract now lives at `frontend/contracts/openapi.yaml` — it is shared by both the web portal and the admin console, so it is no longer owned by `web/`. `contracts.ts` and `services.ts` here remain the web-facing types and endpoint functions.
 
 ## Route Component Analysis
 
