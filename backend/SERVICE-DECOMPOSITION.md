@@ -198,6 +198,7 @@ func buildServices(cfg Config) *Services {
 | Control → Worker（派发任务） | **数据库队列**（river / 表 + 轮询） | 已有 Postgres，不引入 MQ。任务需要持久化与重试 |
 | Worker/Infra → Control（上报状态） | gRPC 或 HTTP | 低频 |
 | Infra Agent → Gateway（自建模型上下线） | 通过 Control 中转 | 避免 Agent 直连 Gateway，减少拓扑耦合 |
+| Control ↔ Infra Agent | **Agent 主动外联的 gRPC 双向流** | 机房在 NAT 后无公网入站地址；不必在机房防火墙开入站端口。详见自建 GPU 方案 §10.5 |
 
 **不引入消息队列作为必需组件。** Postgres 的 `SKIP LOCKED` 做任务队列在我们的量级完全够用（river 就是这么实现的），少一个中间件就少一份运维。真到了 MQ 才能解决的规模，再引入不迟。
 
@@ -216,7 +217,8 @@ func buildServices(cfg Config) *Services {
 | **数据库** | Postgres（compose / 托管） | Supabase / RDS | + ClickHouse 承接 `request_logs` |
 | **服务通信** | 进程内直调 | gRPC | gRPC |
 | **状态共享** | Redis（单实例） | Redis | Redis 集群 |
-| **Infra Agent** | 同进程模块 | 独立部署（若有自建模型） | 独立部署 |
+| **Infra Agent** | 同进程模块 | **每 GPU 节点一个**（机房与云上均有） | 同左 |
+| **Gateway 部署位置** | 本机 | **仅云上一套**（机房与云同城，见自建方案 §10.5） | 同左，按需加副本 |
 | **运维复杂度** | compose 起 3 个容器 | 3 类 Deployment | 加 HPA、独立存储 |
 
 **关键**：`monolith` 不再是"必须交付的产品形态"（私有化单机已取消），但仍应保持可用——它是**本地开发的默认拓扑**，也是"拆分尚未触发时"的生产形态。CI 至少要保证它能启动并跑通冒烟测试，否则装配层会悄悄腐化，等到想拆时才发现远程实现从来没被验证过。
@@ -288,6 +290,9 @@ func buildServices(cfg Config) *Services {
 > **必需服务**，`frontend/admin` 的私有化部署五页有后端支撑，自建 vLLM/SGLang 成为一等供给来源。
 > 由此产生的容量、成本、路由问题见 [`SELF-HOSTED-GPU-OPERATIONS.md`](./SELF-HOSTED-GPU-OPERATIONS.md)。
 
-**C. 是否已有 K8s 平台？** 微服务的运维成本高度依赖平台成熟度。如果已有成熟的 K8s + 服务网格 + 可观测性，拆分成本会低很多；如果没有，S2 之前要先补平台。
+> ~~**C. 是否已有 K8s 平台？**~~ **已定**：**不用 K8s**，裸机 + Docker。
+> 这意味着拆分后的服务编排也走 docker-compose（平台服务是固定拓扑，正合适），
+> 服务发现由 Control 的配置下发承担，不需要注册中心。
+> 代价是没有 HPA——`split` 拓扑下 Gateway 的扩容首版为人工/脚本触发。
 
 **D. Control API 内部是否有团队边界？** 如果 catalog / billing / analytics 由不同团队负责且冲突频繁，可以考虑进一步拆分——但必须先接受"计费不跨服务边界"这条底线，否则会掉进分布式事务的坑。

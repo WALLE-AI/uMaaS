@@ -632,10 +632,13 @@ factor = 1                                    当 remaining ≥ rampStart
 
 **回退链**：按 effective 分数降序，最多尝试 N 个。
 
-> **自建 GPU 供给接入本评分引擎的方式**见 [`SELF-HOSTED-GPU-OPERATIONS.md`](./SELF-HOSTED-GPU-OPERATIONS.md) §2：
-> 新增 `costFactor` 维度（自建边际成本≈0 故满分）、队列深度并入 `speed` 因子、
-> `headroomFactor` 对自建喂显存水位而非配额。三者叠加使「自建优先 + 饱和溢出」
-> 成为评分的**涌现结果**，无需任何硬编码规则。
+> **自建 GPU 供给接入本评分引擎的方式**见 [`SELF-HOSTED-GPU-OPERATIONS.md`](./SELF-HOSTED-GPU-OPERATIONS.md) §2。
+> 供给实际分三层（自有机房 / 云上 GPU 实例 / 云端 API），`costFactor` 相应分档；
+> 队列深度并入 `speed` 因子、`headroomFactor` 对自建喂显存水位而非配额。
+> 三者叠加使「自有机房优先 → 云上实例 → 云端 API 溢出」成为评分的**涌现结果**。
+>
+> **但有一类约束不能用评分表达**：数据驻留（某些请求不得离开内网）是零容忍的合规要求，
+> 必须在评分**之前**做可行集硬过滤，且过滤后为空时明确报错而非降级。见该文 §2.1。
 
 **回退的边界条件比排序重要**：
 
