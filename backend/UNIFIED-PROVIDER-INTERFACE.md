@@ -553,6 +553,8 @@ type ModelNames struct {
 
 一个具体例子说明为什么不能合并：促销别名 `gpt-5.6-sol-promo` 的 `Billing` 是它自己（打折价），`Resolved` 和 `Upstream` 都是真实模型。若用同一个字段，要么路由找不到渠道，要么计费算成原价。
 
+**`Billing` 是价目表的唯一计费主体键**（见 [计价与计费方案 §3.2](./BILLING-AND-PRICING.md)）。这里说的是"计费别名不参与路由"；反方向的**"路由不参与计费"**同样必须成立——三层供给下同一模型的成本随渠道变化，但**售价锚定 `Billing` 名，不随路由波动**，否则同一个 prompt 两次调用会是不同价格。见该文 §4.2。
+
 ### 5.4 能力协商（Capability Manifest）
 
 这是"1000+ 模型"真正的管理手段。每个模型声明自己支持什么：
@@ -603,6 +605,37 @@ effective = base × headroomFactor × rateLimitFactor                    // 乘�
 | `custom` | 用户自定义 | | |
 | `priority` | 退回手工链，不走评分 | | |
 
+**策略是可编辑对象，需要落表。** admin 的 `/admin/catalog/routing`（`ARCHITECTURE.md` §5.5 清单）把策略做成了界面上能改的实体，而上表若只存在于代码常量里，`custom` 就无处安放。
+
+```sql
+routing_policies(
+  id, name,
+  scope_kind,          -- 'global' | 'workspace' | 'model'
+  scope_id,            -- workspace_id / model_id；global 时为 NULL
+  strategy,            -- balanced | smartest | fastest | reliable | custom | priority
+  weights jsonb,       -- {reliability, speed, intelligence}，仅 custom 使用
+  fallback_depth int,  -- 回退链最多尝试几个渠道
+  updated_by, updated_at
+);
+CREATE UNIQUE INDEX ON routing_policies (scope_kind, COALESCE(scope_id, ''));
+```
+
+四条约束：
+
+- **解析顺序**：`model` > `workspace` > `global`，整体覆盖不做字段级合并——与计价方案 §3.4 的价目解析同一条原则，理由相同（合并后没人能说清当前实际生效的是什么）。
+- **`custom` 的权重必须校验和为 1**（凸组合的前提，见上文）。写入时校验，不要等到评分时才发现——那时错误会表现为"排序看起来有点怪"，极难归因。
+- **`reliability` 的权重下限建议 0.30**。上表里 `smartest` / `fastest` 都保留了 0.35 的可靠性权重，编码的是"聪明但总失败的模型不该赢"这个判断。允许用户把它设成 0，等于允许他们把这条判断关掉。
+- **改动走审计**，标 `destructive = true`：路由策略直接决定流量去向与成本。
+
+策略是慢变数据，热路径读内存缓存 + `LISTEN/NOTIFY` 失效通知（`ARCHITECTURE.md` §2.3 选 pgx 原生接口的理由之一）。
+
+**前端的策略枚举与本表对不上，需要对齐。** admin 的 `RoutingPolicy.strategy` 是四个中文档位（`质量优先 | 成本优先 | 延迟优先 | 均衡`），而本节是六个（`balanced | smartest | fastest | reliable | custom | priority`）。前三个能对应（质量↔smartest、延迟↔fastest、均衡↔balanced），但有两处缺口：
+
+- **`成本优先` 在本引擎里没有对应策略。** 成本进入评分的方式是**乘性护栏 `costFactor`**（`SELF-HOSTED-GPU-OPERATIONS.md` §2），不是凸组合里的一个维度——把它做成一个权重档位在数学上讲不通（成本与可靠性/速度/智能不同量纲，正是 §5.5 开头批评的那种写法）。可选的落法是把它实现为**提高 `costFactor` 的影响力**（如对 costFactor 取更陡的 ramp），并在 UI 上说清它不是权重。
+- `reliable` / `custom` / `priority` 前端没有入口，而 `custom` 正是 `weights jsonb` 存在的理由。
+
+**枚举值本身应当是英文常量**，中文只作为 UI 显示层的映射——admin 的 `contracts.ts` 顶部已经写明"混入前端 UI 状态是已知的设计债，接后端时应改为映射函数"，这里是同一类问题。
+
 注意 `smartest` 的 reliability 仍有 0.35、`fastest` 仍有 0.35——**一个聪明但总是失败的模型不该赢，一个快但坏掉的模型也不该赢**。权重设计本身编码了这个判断。
 
 **护栏是乘性的，这一点很关键**：
@@ -652,9 +685,61 @@ factor = 1                                    当 remaining ≥ rampStart
 
 健康状态机借鉴 sub2api，并加入**探针退休**：连续失败的渠道降低探测频率，避免对已死的上游持续打无效请求。
 
+### 5.6 渠道连通性测试：手工测试与自动探针是两回事
+
+admin 的 `POST /admin/catalog/channels/{id}/test`（`ARCHITECTURE.md` §5.5）会向上游发**真实请求**，此前没有设计。它与 §5.5 的自动探针形似而神不同，四个问题必须分别回答。
+
+**① 探哪个模型。** 一个渠道可能挂着上百个模型，探测只能选一个。优先级：
+
+```
+admin 在界面上显式指定的模型
+  → 该渠道 channel_models 里标了 is_probe 的模型
+  → 该渠道近 7 日调用量最高的模型（最能代表真实可用性）
+  → 都没有则拒绝执行，要求先指定
+```
+
+最后一条不要省。随便挑一个模型探测，会得到"渠道健康但用户要的那个模型 404"这种最具误导性的结果——**自建 vLLM 的 `--served-model-name` 陷阱（§7）正是这么漏过去的**。
+
+**② 探测请求的形态**，四个参数都不是可选的：
+
+```
+max_tokens = 1        固定提示词，不带工具、不带多模态
+stream     = false    流式会把首字节窗口与 stall 两套超时也拖进来，测试不需要
+timeout    = 10s      比生产的 firstByteTimeout 更短，测试要快速给结论
+retry      = 0        不走回退链——测的就是这一个渠道
+```
+
+**③ 费用记在哪。** 它产生真实上游消耗，因此按计价方案 §4.3 的规则：写一条 `request_logs`，`workspace_id = NULL`（平台自身发起）、`charged_amount_nano = 0`、`upstream_cost_nano` 照实记、`origin = 'admin_probe'`。
+
+**成本可见但不进任何客户账单。** 不记的话，渠道测试的费用会变成上游账单里对不上的一块（计价方案 §11-F 的差异率监控会因此持续报警，而排查方向完全是错的）。
+
+**④ 结果不写入健康状态机。** 这一条最容易做错，也最重要：
+
+> **手工测试的结果只返回给操作者与审计日志，不进 Beta 后验、不影响 Thompson 采样、不触发降权。**
+
+两个理由。其一，**样本有偏**：人工点测试的时机通常是"已经怀疑这个渠道有问题"，把这些样本喂进后验等于让运维的怀疑自我实现。其二，**可被无意操纵**：连点五次测试就能把一个健康渠道的后验拉低，进而改变真实流量的去向——一个只读的诊断动作不该有这种副作用。
+
+反过来，§5.5 的自动探针照常写入。两者的区别就在这一条上，实现时必须走不同的代码路径，而不是共用一个函数加 `isManual` 参数——那个参数迟早会传错。
+
+**限频**：每渠道每分钟最多 N 次（建议 6）。测试按钮是会被反复点的，而每一次都在消耗上游配额。
+
+**返回分项结果，不是一个 bool。** 前端现在的 `ChannelTestResult = { ok, latency, detail }` 只能表达"通过/不通过"，而失败原因的处置完全不同：
+
+| 检查项 | 失败含义 | 运维该做什么 |
+|---|---|---|
+| 连通 | DNS / TLS / 网络不可达 | 查网络与 base_url |
+| 鉴权 | 401 无效、**402 有额度问题但凭证正常**、403 结论不确定（§2.3 的三分法） | 401 换密钥；402 充值；403 不要动 key |
+| 模型可用 | 404 model not found | 查 `channel_models.upstream_model_name` 与上游实际名字 |
+| 响应可解析 | 返回 200 但不是预期结构 | 该厂商可能不是真正的 OpenAI 兼容，要加 Quirks |
+
+**契约要相应扩展**（`frontend/admin/src/api/contracts.ts:172`），把四项分开返回。合成一个 `ok` 等于把上面这张表的信息在服务端丢掉，然后指望运维从 `detail` 字符串里读出来。
+
 ---
 
 ## 6. 异步任务（视频/图像生成）
+
+> 本节的三阶段计费是**异步任务专有**的部分；同步请求的预扣—结算—释放、幂等、
+> 悬挂回收与价目模型见 [`BILLING-AND-PRICING.md`](./BILLING-AND-PRICING.md) §5，两者共用同一套 reservation。
 
 video、Midjourney 这类能力不是"慢的 chat"，而是**另一种交互形态**：提交拿任务 ID → 轮询 → 取结果。硬塞进同步接口会把整个链路的超时设计带偏。
 

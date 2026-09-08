@@ -2,12 +2,13 @@
 
 > 状态：待评审 · 2026-09-06
 > 语言：Go · 数据库：**PostgreSQL / Supabase（唯一生产库）**
-> 契约来源：`frontend/src/api/openapi.yaml`（控制平面 21 个端点）+ OpenAI 兼容推理接口
+> 契约来源：`frontend/contracts/openapi.yaml`（面向 web 的 21 个端点）+ `frontend/admin/src/api/services.ts`（管理端 34 个端点，见 §5.5）+ OpenAI 兼容推理接口
+> **控制平面实际是 55 个端点**，管理端比面向用户的门户还大——分期计划里的 B6 要按这个规模估工期
 > 服务对象：`frontend/web`（开发者门户与自助控制台）、`frontend/admin`（平台管理控制台）
 
 ## 文档关系
 
-本目录有四份设计文档，职责边界如下。**同一个决策只在一处详述，另一处引用**——重复维护必然漂移。
+本目录有六份设计文档，职责边界如下。**同一个决策只在一处详述，另一处引用**——重复维护必然漂移。
 
 | | `ARCHITECTURE.md`（本文） | `UNIFIED-PROVIDER-INTERFACE.md` | `SERVICE-DECOMPOSITION.md` |
 |---|---|---|---|
@@ -17,13 +18,17 @@
 
 第四份 [`SELF-HOSTED-GPU-OPERATIONS.md`](./SELF-HOSTED-GPU-OPERATIONS.md) 是 `SERVICE-DECOMPOSITION.md` §3-④ Infra Agent 的展开，**是混合供给路由、GPU 容量管理、自建成本核算的真相源**。它依赖前两份定义的评分引擎与数据模型。
 
-因此两者是**双向引用但非循环**：本文定边界，UNIFIED 在边界内深入，深入的结果再回填本文。凡标注"真相源"的地方，改动只改那一处。
+第六份 [`IMPLEMENTATION-PLAN.md`](./IMPLEMENTATION-PLAN.md) 是本文 §9「分期实施」的展开，**是任务分解、依赖顺序、迭代边界与交付判据的真相源**。它不产生新的技术决策，只把五条子序列（B/P/M/G/S）排到一条时间线上并裁决冲突。
+
+第五份 [`BILLING-AND-PRICING.md`](./BILLING-AND-PRICING.md) 是本文 §4.3「用量与计费」与 §6.3「计量与计费」的展开，**是价目模型与版本化、计费口径、预扣—结算—释放、余额与信用额度、成本归集与毛利、计费对账的真相源**。它修正了本文 §4.1/§4.3 的两处字段设计（`balance_usd`、`cost_usd_micro`），改动请改那一处。
+
+因此这些文档是**双向引用但非循环**：本文定边界，其余四份在边界内深入，深入的结果再回填本文。凡标注"真相源"的地方，改动只改那一处。
 
 ---
 
 ## 已定决策速查
 
-截至 2026-09-07 已确认的决策，实施时以此为准。每条给出出处，细节看对应章节。
+截至 2026-09-08 已确认的决策，实施时以此为准。每条给出出处，细节看对应章节。
 
 | # | 决策 | 出处 |
 |---|---|---|
@@ -47,8 +52,21 @@
 | 18 | GPU **自有机房 + 云上实例都有** → 供给分三层，成本策略各异 | 自建 GPU §1/§3 |
 | 19 | 机房与云 **同城/同区域**，**Gateway 只部署一套在云上** | 自建 GPU §10.5 |
 | 20 | Infra Agent **每节点一个**，一律**主动外联**连 Control | 自建 GPU §10.5 |
+| 21 | **平台管理员与工作空间成员是两套身份体系**，独立建表 | 本文 §4.5 |
+| 22 | 运行时可改的系统设置落 `settings` 表，与 koanf 的启动期配置边界划死 | 本文 §4.5 |
+| 23 | 控制平面实际 **55 个端点**（web 21 + admin 34），管理端清单以 §5.5 为准 | 本文 §5.5 |
+| 24 | **成本与售价是两本账**，`cost_usd_micro` 拆为三列；金额单位改纳美元 | 计价方案 §2/§3.5 |
+| 25 | **价目由 admin 单一写入口录入**，上游同步只产出建议；展示价与计费价同源 | 计价方案 §3.6 |
+| 26 | **计费为预付**，余额强一致扣减；企业后付以 `credit_limit` 表达，**首版留字段不产品化** | 计价方案 §6.1 |
+| 27 | **自建模型对标云端定固定价**，售价与成本解耦（成本才是摊销值） | 计价方案 §3.6-⑤ |
+| 28 | **admin 用独立账号 + 强制 TOTP**，首个 `super_admin` 由 CLI bootstrap | 本文 §4.5 |
+| 29 | 缓存命中**跟随上游给折扣**；免费额度**按月重置**；**不做阶梯价**；自建按对标云端 **×0.7** | 计价方案 §11 B/C/D/G |
+| 30 | **首版不接支付通道**，充值由 admin 手工入账（走审计、标 destructive） | 计价方案 §11-H |
+| 31 | 上游账单**只做差异率监控**（阈值 3%），不逐条对账 | 计价方案 §11-F |
+| 32 | 渠道**手工测试不写入健康状态机**，费用记 `upstream_cost` 且不属任何客户 | 统一接口 §5.6 |
 
-**仍未决、但不阻塞 B0–B3 的**：上游供应商范围、入口协议范围（建议至少 OpenAI + Anthropic）、计费模型（预付/后付）、是否有数据驻留客户、是否复用 RelayKit。
+**仍未决、但不阻塞的**：上游供应商范围、入口协议范围（建议至少 OpenAI + Anthropic）、是否有数据驻留客户、是否复用 RelayKit、发票与税务（与支付通道一起决策）。
+另有三个待给的数字见 [`IMPLEMENTATION-PLAN.md`](./IMPLEMENTATION-PLAN.md) §7。
 
 ---
 
@@ -233,7 +251,7 @@ backend/
 │   └── queries/                sqlc 查询（单一 Postgres 方言）
 │
 ├── api/
-│   └── openapi.admin.yaml      管理端契约（补齐 §9.3 端点，与前端 contracts 对齐）
+│   └── openapi.admin.yaml      管理端契约（按 §5.5 的清单补齐，与前端 contracts 对齐）
 │
 ├── sqlc.yaml
 ├── go.mod
@@ -263,7 +281,8 @@ oauth_identities user_id, provider, provider_uid, UNIQUE(provider, provider_uid)
 
 - **`api_keys` 只存哈希与前缀**。契约里写明"密钥仅展示一次"，那服务端就不该有能力再展示第二次。前缀（`um_live_8f2a`）用于列表展示与日志定位，哈希用于校验。
 - 会话表带 `revoked_at` 而非直接删除：`/auth/session` 要能区分"没登录"和"会话已被踢下线"。
-- `balance_usd` 用 **整数分（bigint）** 存储，不用浮点。契约说"Money values are numeric USD amounts"，但那是 JSON 表示；内部存储必须避开二进制浮点的累积误差。
+- `balance_usd` 用**整数**存储，不用浮点。契约说"Money values are numeric USD amounts"，但那是 JSON 表示；内部存储必须避开二进制浮点的累积误差。
+  **单位已由计价方案修正为纳美元（`balance_nano`）**——分和微美元在单 token 粒度上都不够，理由见 [计价与计费方案 §3.5](./BILLING-AND-PRICING.md)。余额的真相在 `credits` 流水表，此列是物化汇总（该文 §6.2）。
 
 ### 4.2 模型目录与供给
 
@@ -289,6 +308,12 @@ upstream_diffs     id, source, fetched_at, payload, applied_at, applied_by
 - `upstream_diffs` 表持久化差异审阅记录——admin 的差异审阅是"先审后用"，那么"抓取了什么/审了什么/谁应用的"必须留痕，否则改价这类操作出问题时无从追溯。
 
 ### 4.3 用量与计费
+
+> ⚠️ **本节的计费相关字段以 [计价与计费方案 §9](./BILLING-AND-PRICING.md) 为准。**
+> 那里做了三处修正：`cost_usd_micro` 拆为 `upstream_cost_nano` / `charged_amount_nano`
+> （成本与售价是两本账，前者可回填、后者不可变）、金额单位由微美元改为纳美元
+> （micro 在单 token 粒度上已经截断）、`request_logs` 改为 attempt 级记录以容纳重试成本。
+> 此处只列摘要，改动请改那一处。
 
 ```
 request_logs     id, workspace_id, api_key_id, model_id, channel_id,
@@ -322,6 +347,43 @@ audit_logs       id, actor, action, target, destructive, detail, ip, created_at
 
 - GPU 的实时指标（利用率、温度、功耗）**不入库**，从 Prometheus 查。入库的只有拓扑与分配关系这类慢变数据。把秒级指标写进业务库是常见错误——那是时序库的活。
 - `audit_logs.destructive` 是布尔标记。admin 的审计页支持"仅看破坏性操作"一键筛选，这个筛选要走索引，所以做成独立字段而不是从 action 字符串推断。
+
+### 4.5 平台管理身份与系统设置
+
+这一节补的是 §5.5 清单里 `/admin/system/*` 那一组的数据模型——此前全系统没有它们，而它们不是 CRUD 的补充，是**两个独立的身份/配置体系**。
+
+**平台管理员不是"某个工作空间的 admin"。**
+
+`memberships.role(owner|admin|developer|viewer)`（§4.1）是**工作空间内**的角色：管自己的 API Key、看自己的账单。而 admin 的 `AdminRole(super-admin|operator|viewer)` 是**平台级**的：看所有客户的账单、改模型价格、删部署实例、停用用户。
+
+把两者合并很有诱惑力（"给某个内部工作空间的 owner 加个 is_staff 标记"），但它错在授权模型：平台权限的作用域是**全局**，而 `memberships` 的每一条都锚定一个 `workspace_id`。合并后每次鉴权都要问"这个 admin 角色是对哪个工作空间说的"，而正确答案是"跟工作空间无关"。
+
+```
+admin_accounts   id, email, name, role(super_admin|operator|viewer),
+                 password_hash, totp_secret_enc, totp_enabled,
+                 status, last_active_at, created_by, created_at, disabled_at
+admin_sessions   id, admin_id, expires_at, ip, user_agent, revoked_at
+```
+
+- **与 `users` / `sessions` 是独立的表**，不共用。作用域不同；且 admin 会话的策略应当更严（更短 TTL、强制 2FA、可选 IP 白名单），共表会逼着两套策略在同一份代码里分支。
+- `AdminAccount.twoFactor` 在前端已是一等字段，因此 `totp_secret_enc` 必须加密存储（与 `channels.credentials_enc` 同一套 AES-GCM）。**已定（2026-09-08）：全员强制 2FA**，不提供关闭入口——该字段因此恒为 true，保留它只为界面显示绑定状态。
+- `created_by` 不可为空：管理员账号只能由管理员创建，没有自助注册入口。**首个 `super_admin` 由 CLI 创建**（`umaas admin create --super`），这是唯一的例外，也是首次部署的必经步骤——**不写进部署文档，第一次上线会卡在没人能登录**。
+- 需要一组 `/admin/auth/*` 端点（登录、登出、会话查询、TOTP 绑定与校验），前端 `services.ts` 里目前一个都没有，写 `openapi.admin.yaml` 时一并补齐。
+- 停用走 `disabled_at` 而非删除行——审计日志里的 `actor` 要能一直解析出人名。因此 `DELETE /admin/system/admins/{id}` 的语义是**停用**而非物理删除，**这一条必须写进契约描述**，否则实现者会照字面做成硬删，然后历史审计记录里出现一批查不到人的 actor。
+
+**系统设置需要一张表，koanf 管不了它。**
+
+§2.5 选的 koanf 是**启动期**配置（env + 文件 + flag），而 admin 的 `SettingGroup` 是**运行时可改**的配置项（前端已定义 `switch | number | select | text` 四种控件及 `options` / `unit`）。两者不是一回事，不能指望一个覆盖另一个。
+
+```
+settings         key, value jsonb, kind, requires_restart, updated_by, updated_at
+```
+
+三条约束：
+
+- **每一项必须声明是否需要重启才生效**，并在界面上标出来。一个改了没反应的开关比没有这个开关更糟——运维会以为它生效了。
+- **写入全部走审计**，其中"影响计费/路由/配额"的项标 `destructive = true`。
+- **启动期配置与运行时配置的边界要划死**：数据库连接串、监听端口、加密密钥只能来自 koanf，永远不进 `settings` 表；限流阈值、默认路由策略、告警开关才放表里。**边界不划死，迟早有人把数据库密码做成一个能在网页上编辑的输入框。**
 
 ---
 
@@ -360,6 +422,57 @@ type Envelope[T any] struct {
 ### 5.4 缓存策略
 
 契约的 README 已经给了每类资源的缓存策略（catalog `max-age=60`、benchmarks `max-age=300`、session `no-store`）。这些直接落到响应头，并配 `ETag`——docs 类资源尤其值得，前端会频繁请求且内容很少变。
+
+### 5.5 管理端端点清单与数据模型归属
+
+此前 `/admin/*` 在本文里只有一个占位（§3 目录树里的一行），而前端 `admin/src/api/services.ts` 已经定义了**全部 34 个端点**。这一节把它们逐条列出并标注归属，**它是 `api/openapi.admin.yaml` 的编写依据**。
+
+> **两份清单已经漂移。** 前端方案 `ADMIN-PLATFORM-UI-DESIGN.md` §9.3 列了 13 条（只覆盖私有化部署），
+> 但 `services.ts` 的实际调用与它并不一致：`services.ts` 多了 `deployments/preflight`、
+> `benchmark/runs/latest`，少了 `deployments/{id}/logs`、`{id}/scale`、`capacity/estimate`
+> （容量评估已确认为纯前端计算，见 `SELF-HOSTED-GPU-OPERATIONS.md` §11.6）。
+> 两份都不是权威——**以本节为准**，实现时以 `services.ts` 的实际调用为交叉验证。
+
+| 端点 | 方法 | 数据模型归属 | 状态 |
+|---|---|---|---|
+| `/admin/overview` | GET | `usage_rollups` + `request_logs` 聚合 | ✅ 有支撑 |
+| `/admin/analytics/usage` | GET | 同上，按 `dimension`/`measure`/`days` 切 | ✅ |
+| `/admin/analytics/users` | GET | `users` / `workspaces` + 留存队列 | ✅ |
+| `/admin/analytics/models` | GET | `model_stats` + 成本口径见计价方案附 1.5 | ⚠️ 成本需带 `cost_kind` |
+| `/admin/catalog/models` | GET | `models` / `media_models`（统一接口 §5.2） | ✅ |
+| `/admin/catalog/models/{id}/delist` | POST | `models.status` 状态机（计价方案 §3.6-③） | ⚠️ 状态机此前未定义 |
+| `/admin/catalog/upstream-diff` | GET | `upstream_diffs`（§4.2） | ✅ |
+| `/admin/catalog/upstream-diff/apply` | POST | 写 `model_prices` 新版本（计价方案 §3.6-①） | ✅ 已补 |
+| `/admin/catalog/channels` | GET | `channels` / `channel_models`（统一接口 §5.2） | ✅ |
+| `/admin/catalog/channels/{id}/test` | POST | **无设计**：连通性探测的口径、超时、是否计费 | ❌ 缺口一 |
+| `/admin/catalog/routing` | GET | **无表**：策略是可编辑对象（统一接口 §5.5） | ❌ 缺口二 |
+| `/admin/infra/nodes` | GET | `nodes` / `gpus`（§4.4） | ✅ |
+| `/admin/infra/gpus/metrics` | GET | 转发 Prometheus，不入库（§4.4） | ✅ |
+| `/admin/infra/registry/models` | GET | `local_models` | ✅ |
+| `/admin/infra/registry/resolve` | POST | 无状态，解析社区仓库元数据 | ✅ |
+| `/admin/infra/registry/pull` | POST | `download_tasks` | ✅ |
+| `/admin/infra/registry/pull/{id}` | DELETE | 同上 | ✅ |
+| `/admin/infra/deployments` | GET / POST | `deployments`（自建 GPU §11.4） | ✅ |
+| `/admin/infra/deployments/preflight` | GET | 部署预检（自建 GPU §7、§11.4） | ✅ |
+| `/admin/infra/deployments/{id}` | DELETE | drain 后回收（自建 GPU §11.4） | ✅ |
+| `/admin/infra/benchmark/runs` | GET | `benchmark_runs` | ✅ |
+| `/admin/infra/benchmark/runs/latest` | GET | 同上 | ✅ |
+| `/admin/customers/users` | GET | `users` + 汇总 | ✅ |
+| `/admin/customers/users/{id}/suspend` | POST | `users.status` | ✅ |
+| `/admin/customers/workspaces` | GET | `workspaces` + 席位/预算 | ✅ |
+| `/admin/customers/billing` | GET | `invoices` / `topups`（计价方案 §7） | ✅ 已补 |
+| `/admin/customers/topups/{id}/refund` | POST | `topups.status='refunded'` + `credits` 负向调整（计价方案 §6.2） | ✅ 已补 |
+| `/admin/system/settings` | GET / PATCH | `settings`（§4.5） | ✅ 已补 |
+| `/admin/system/admins` | GET | `admin_accounts`（§4.5） | ✅ 已补 |
+| `/admin/system/admins/{id}` | DELETE | **语义是停用**，写 `disabled_at`（§4.5） | ✅ 已补 |
+| `/admin/system/audit` | GET | `audit_logs`（§4.4） | ✅ |
+
+**两个缺口均已补齐**（2026-09-08），补在各自的真相源里：
+
+- **渠道连通性测试** → `UNIFIED-PROVIDER-INTERFACE.md` **§5.6**。要点：探测模型的选取优先级、请求形态（`max_tokens=1`、非流式、不重试）、费用记 `upstream_cost` 且 `workspace_id=NULL`、**手工测试的结果不写入健康状态机**（样本有偏且可被无意操纵）、限频、返回分项结果而非一个 bool。
+- **路由策略无处存储** → `UNIFIED-PROVIDER-INTERFACE.md` **§5.5**，`routing_policies` 表已补。
+
+**关于 B6 的工期**：管理端 34 个端点比面向用户的 21 个还多，且其中 11 个依赖 B7 的私有化部署模块。B6 那一行不是"补一批 CRUD"，实际是本项目最大的单个阶段。
 
 ---
 
@@ -413,6 +526,12 @@ type Envelope[T any] struct {
 3. **不要假装成功**。有的网关会在中断时静默补一个 `finish_reason: stop`，这会让客户端以为拿到了完整回答——比明确报错有害得多。
 
 ### 6.3 计量与计费：不能每请求同步写库
+
+> **计费的完整设计已单独展开为 [`BILLING-AND-PRICING.md`](./BILLING-AND-PRICING.md)。**
+> 本节只定"写入路径按一致性分流"这一条策略；价目模型、预扣估算公式、reservation 的
+> 悬挂回收、对账的三个参数（周期 / 等式 / 告警阈值）全部以该文为准。
+> 尤其注意：本节末尾"不会因此产生坏账"的论证**只覆盖日志批量写的丢失窗口**，
+> 预扣的悬挂窗口是另一个坑，见该文 §5.3。
 
 每个推理请求都要记一条日志、扣一次配额。同步写库会让数据库成为吞吐瓶颈。
 
@@ -516,6 +635,14 @@ admin 的工具调用分析页有一个维度是空的：按 Agent 框架（Clau
 
 ## 9. 分期实施
 
+> **任务级的分解、依赖顺序与迭代边界已单独展开为 [`IMPLEMENTATION-PLAN.md`](./IMPLEMENTATION-PLAN.md)。**
+>
+> 本节的 B0–B7 是**阶段**，那份文档把它与其余四条子序列（统一接口 P1–P7、计价 M1–M7、
+> 自建 GPU G1–G7、服务拆分 S0–S4）合并成 **I0–I9 十个迭代**，并裁决了三处排期冲突——
+> 其中最要紧的是：**M1/M2 必须紧跟 B3，不能等到 B5**（`request_logs` 与价目表一旦有生产数据，
+> 改动就从改代码变成数据迁移 + 历史账单重算）。另有八项跨领域任务此前不属于任何序列，
+> 在那里记为 X 系列。
+
 | 阶段 | 内容 | 交付判据 |
 |---|---|---|
 | **B0** | 骨架：config、store 抽象、迁移、信封与错误映射、日志与 request_id、健康检查 | 两种驱动都能启动并通过迁移；`/healthz` 可用 |
@@ -523,8 +650,8 @@ admin 的工具调用分析页有一个维度是空的：按 Agent 框架（Clau
 | **B2** | 目录只读：`/catalog/summary`、`/models`、`/models/{p}/{m}`、`/benchmarks`、`/rankings`、`/docs/*` | web 首页与模型页脱离 `data.ts` |
 | **B3** | 数据平面 MVP：`/v1/chat/completions`（含流式）、单渠道直连、请求日志 | 能用 OpenAI SDK 调通，SSE 正常 |
 | **B4** | 路由与回退：多渠道、权重、健康检查、自动降权 | 主渠道故障时自动切换 |
-| **B5** | 计量计费：配额、余额、用量聚合、API Key | 用量数字与实际调用对得上 |
-| **B6** | 管理端：`/admin/*` 全部端点 | admin 关掉 `VITE_USE_MOCK` 后可用 |
+| **B5** | 计量计费：配额、余额、用量聚合、API Key（细分为 M1–M7，见[计价方案 §10](./BILLING-AND-PRICING.md)） | 用量数字与实际调用对得上；并发压测不超额 |
+| **B6** | 管理端：`/admin/*` **34 个端点**（清单见 §5.5）+ 平台管理身份与系统设置（§4.5） | admin 关掉 `VITE_USE_MOCK` 后可用；管理员可用独立账号 + 2FA 登录 |
 | **B7** | 私有化部署模块：GPU 指标、模型拉取、部署编排、压测 | admin 的 infra 五页接真实数据 |
 
 **B3 建议早做**。它是整个产品的价值核心，也是技术风险最高的部分（流式、超时、取消、计费）。把风险前置，比先做完一堆 CRUD 再发现流式转发有坑要好。
@@ -541,11 +668,28 @@ admin 的工具调用分析页有一个维度是空的：按 Agent 框架（Clau
 
 **B. 上游供应商范围。** 首版接哪几家？OpenAI / Anthropic / Google 三家的 API 差异不小（尤其流式事件格式与工具调用协议），每家适配器都是实打实的工作量。自建 vLLM/SGLang 因为是 OpenAI 兼容，可复用 openai 适配器。
 
-**C. 计费模型。** 按 token 实时扣费，还是按月账单后付？前端的 console 页显示了"余额 $42.80"与"自动充值"，看起来是预付费模式。这决定 `balance` 是否需要强一致扣减。
+> ~~**C. 计费模型。**~~ **已定（2026-09-08）**：**预付**。余额按强一致扣减（本文 §6.3 的 Redis 原子裁决 +
+> Postgres 对账），企业月结用 `workspaces.credit_limit_nano` 表达，**首版建列但保持 0、不做产品化**——
+> 该列无论如何都必须存在，[计价方案 §5.3](./BILLING-AND-PRICING.md) 的补记路径要求余额可短暂为负。
+> B5 就此解除阻塞，实施细分见该文 §10 的 M1–M7。
+>
+> **附带未决**：前端 console 已画"自动充值"，它需要支付通道。**首版若不接支付，充值只能由 admin 手工入账**，
+> 前端要相应处理该入口的状态。这不阻塞 B5 的计量部分。
 
 **D. 是否需要多租户隔离到数据库级别？** 当前设计是共享库 + `workspace_id` 过滤。如果有客户要求数据物理隔离，架构要改（schema per tenant 或 db per tenant）。
 
 **E. admin 契约还没写进 openapi。** 前端 `admin/src/api/services.ts` 里已定义了全部 `/admin/*` 端点路径，但仓库级 openapi 里还没有。建议在 B0 阶段补齐 `api/openapi.admin.yaml`，让两端契约都有唯一真相源。
+
+> **已补（2026-09-08）**：端点清单与数据模型归属见 §5.5，缺失的数据模型见 §4.5。
+> 写 `openapi.admin.yaml` 时以 §5.5 为依据。
+>
+> **管理端认证已定（2026-09-08）**：**独立账号 + 强制 TOTP**，即 §4.5 的 `admin_accounts` /
+> `admin_sessions` 两表，**全员强制 2FA**（不只 `super_admin`），首个 `super_admin` 由
+> `umaas admin create --super` 从 CLI 创建，无网页注册入口。B6 就此解除阻塞。
+> **但契约缺口仍在**：`services.ts` 里没有任何 login/session 调用，`/admin/auth/*` 这组端点
+> 前后端都还没定义——写 `openapi.admin.yaml` 时要一并补上（登录、登出、会话查询、TOTP 绑定与校验）。
+>
+> 仍未闭合的一处是**渠道连通性测试的口径**（§5.5 缺口一）。
 
 > **已定（2026-09-06）**：运营自有 GPU 集群。自建 vLLM 成为一等供给来源，
 > 由此产生的容量、成本与混合路由问题见 [`SELF-HOSTED-GPU-OPERATIONS.md`](./SELF-HOSTED-GPU-OPERATIONS.md)。
