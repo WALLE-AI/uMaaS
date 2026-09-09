@@ -1,0 +1,86 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Vet
+        run: make vet
+
+      - name: Unit tests
+        run: make test
+
+      # 依赖成环是拆分的头号杀手，且它总是悄悄形成的
+      # （SERVICE-DECOMPOSITION.md §5-规则四）。
+      - name: Dependency graph is a DAG
+        run: make check-deps
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+
+  integration:
+    runs-on: ubuntu-latest
+    # 集成测试跑在真实 Postgres 上。用 SQLite 测、Postgres 跑生产，
+    # 等于把方言相关的 bug 全部排除在测试覆盖之外（ARCHITECTURE.md §7）。
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: umaas_test
+          POSTGRES_USER: umaas
+          POSTGRES_PASSWORD: umaas
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U umaas -d umaas_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      UMAAS_DATABASE__DSN: postgres://umaas:umaas@localhost:5432/umaas_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # testcontainers 在 CI 上也能跑（runner 自带 Docker），
+      # 但 service container 更快，两条路都保持可用。
+      - name: Integration tests
+        run: make test-integration
+
+      # monolith 拓扑必须能启动并跑通冒烟，否则装配层会悄悄腐化——
+      # 等到想拆服务时才发现远程实现从来没被验证过（SERVICE-DECOMPOSITION.md §7）。
+      - name: Migrate
+        run: make migrate
+
+      - name: Smoke (monolith topology)
+        env:
+          # 管理员的 TOTP 密钥必须加密入库，冒烟里会创建一个管理员。
+          UMAAS_SECURITY__ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+        run: make smoke

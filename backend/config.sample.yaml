@@ -1,0 +1,57 @@
+# 配置样例。
+#
+# 分层顺序：默认值 → 本文件 → 环境变量。
+# 环境变量前缀 UMAAS_，双下划线表示层级：UMAAS_DATABASE__DSN → database.dsn
+#
+# 这里只放**启动期**配置。运行时可改的配置项走 settings 表（ARCHITECTURE.md §4.5）——
+# 边界不划死，迟早有人把数据库密码做成一个能在网页上编辑的输入框。
+
+env: dev            # dev | staging | prod
+topology: monolith  # monolith | split（split 需要 S2 之后）
+
+control_plane:
+  enabled: true
+  addr: ":8080"
+  read_header_timeout: 10s
+  write_timeout: 30s
+  idle_timeout: 120s
+  shutdown_timeout: 20s
+
+data_plane:
+  enabled: true
+  addr: ":8081"
+  read_header_timeout: 10s
+  # 必须是 0：SSE 流可以跑几分钟，任何整体写超时都会在正常的长响应中途
+  # 砍断连接。config.Validate 会拒绝非 0 值。
+  write_timeout: 0s
+  idle_timeout: 120s
+  # 比控制平面长：在途流式请求可能还要几十秒，直接切断等于让用户的请求
+  # 白费——而那是已经付过上游费用的。
+  shutdown_timeout: 60s
+
+database:
+  dsn: "postgres://umaas:umaas@localhost:5432/umaas?sslmode=disable"
+  max_conns: 20
+  min_conns: 2
+  max_conn_lifetime: 1h
+  # Supabase 默认给的是 PgBouncer transaction 模式地址（6543 端口），
+  # 该模式不支持 prepared statement 缓存。用 6543 时必须打开这个开关，
+  # 或改用直连端口 5432（ARCHITECTURE.md §2.4）。
+  pgbouncer_mode: false
+  # 只允许 dev 打开。生产环境迁移是部署流水线的独立步骤：
+  # 多副本同时启动会竞争迁移锁（ARCHITECTURE.md §8）。
+  auto_migrate: true
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+
+observability:
+  service_name: umaas
+  metrics_enabled: true
+  metrics_addr: ":9090"
+
+log:
+  level: info   # debug | info | warn | error
+  format: json  # json | text

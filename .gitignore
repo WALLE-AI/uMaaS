@@ -21,3 +21,6 @@ Thumbs.db
 # 仅作阅读参考，不是本仓库的产物。约 255MB / 6000+ 文件，
 # 提交进来会污染历史且 gitlink 行为诡异。需要的人自行 clone。
 opensource/
+
+# Go 构建产物
+backend/bin/

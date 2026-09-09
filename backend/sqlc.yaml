@@ -1,0 +1,35 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries
+    gen:
+      go:
+        package: dbgen
+        out: internal/store/postgres/dbgen
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_empty_slices: true
+        overrides:
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          # inet 不能扫进 string：pgx 的二进制格式只认 netip.Addr。
+          # 保留 inet 而不是退回 text，是因为审计要能按网段查
+          # （"这个 /24 里发生过什么"），text 列做不到。
+          - db_type: "inet"
+            go_type:
+              import: "net/netip"
+              type: "Addr"
+          - db_type: "inet"
+            nullable: true
+            go_type:
+              import: "net/netip"
+              type: "Addr"
+              pointer: true

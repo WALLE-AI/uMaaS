@@ -1,0 +1,43 @@
+# 本地开发依赖。
+#
+# compose 只管平台服务（固定拓扑），推理实例由 Infra Agent 经 Docker API 动态创建
+# ——compose 是单机工具，跨节点编排必须自己解决（SELF-HOSTED-GPU-OPERATIONS.md §11.2）。
+#
+# 开发环境与生产同构本身就是收益：不保留 SQLite「零依赖启动」这条路
+# （ARCHITECTURE.md §7），`docker compose up -d` 一行就够了。
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: umaas
+      POSTGRES_USER: umaas
+      POSTGRES_PASSWORD: umaas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umaas -d umaas"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    # Redis 是必需组件，但只作原子裁决层——真相源仍在 Postgres。
+    # 它一挂应当是降级而不是数据丢失（ARCHITECTURE.md §2.5）。
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
