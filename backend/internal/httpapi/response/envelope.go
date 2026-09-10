@@ -38,6 +38,10 @@ type ErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Field   string `json:"field,omitempty"`
+	// Details 是契约里 error.details 那个自由对象。只在**客户端需要据此
+	// 决定下一步**时才填（例如改价被拒时的逐条校验结果），
+	// 而不是拿来倒内部错误信息——那是 5xx 分支明确不做的事。
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // JSON 写一个成功响应。
@@ -65,6 +69,19 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 			"error", err,
 			"path", r.URL.Path,
 		)
+	}
+	write(w, r, status, ErrorBody{Error: detail, RequestID: platform.RequestID(r.Context())})
+}
+
+// ErrorWithDetails 与 Error 相同，但附带 error.details。
+//
+// 存在的理由只有一个：**422 要能一次说清"哪里不对"**。改价被拒时只回一句
+// "validation failed"，前端只能再调一次 preview 才知道原因，而那两次调用之间
+// 数据可能已经变了。
+func ErrorWithDetails(w http.ResponseWriter, r *http.Request, err error, details map[string]any) {
+	status, detail := mapError(err)
+	if status < 500 {
+		detail.Details = details
 	}
 	write(w, r, status, ErrorBody{Error: detail, RequestID: platform.RequestID(r.Context())})
 }

@@ -7,6 +7,8 @@ package dbgen
 import (
 	"net/netip"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AdminAccount struct {
@@ -48,11 +50,123 @@ type AuditLog struct {
 	CreatedAt   time.Time
 }
 
+type Benchmark struct {
+	ID            int64
+	Slug          string
+	Name          string
+	Category      string
+	Description   string
+	Methodology   string
+	Configuration []byte
+	RunCount      int32
+	LastRunAt     *time.Time
+	CreatedAt     time.Time
+}
+
+type BenchmarkResult struct {
+	ID          int64
+	BenchmarkID int64
+	ModelID     int64
+	Score       pgtype.Numeric
+	Percentile  pgtype.Numeric
+	CostNano    int64
+	DurationMs  pgtype.Numeric
+	SampleCount int32
+	RunAt       time.Time
+}
+
+type DocsPage struct {
+	ID            int64
+	Slug          string
+	GroupTitle    string
+	GroupPosition int32
+	Position      int32
+	Title         string
+	Description   string
+	Badge         string
+	BodyMarkdown  string
+	UpdatedAt     time.Time
+}
+
 type Membership struct {
 	UserID      int64
 	WorkspaceID int64
 	Role        string
 	CreatedAt   time.Time
+}
+
+type Model struct {
+	ID                  int64
+	ProviderID          int64
+	Slug                string
+	DisplayName         string
+	Description         string
+	LogoUrl             string
+	Modalities          []string
+	Capabilities        []string
+	ContextLength       *int32
+	MaxOutputTokens     *int32
+	Architecture        *string
+	InputFormats        []string
+	OutputFormats       []string
+	SupportedParameters []string
+	ZeroDataRetention   bool
+	OpenWeights         bool
+	Hosting             string
+	BillingModel        string
+	Status              string
+	CanaryPercent       *int32
+	Featured            bool
+	FeaturedRank        *int32
+	QualityScore        pgtype.Numeric
+	ReleasedAt          time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+type ModelActivity struct {
+	ID         int64
+	ModelID    int64
+	Type       string
+	Title      string
+	OccurredAt time.Time
+}
+
+type ModelFaq struct {
+	ID       int64
+	ModelID  int64
+	Question string
+	Answer   string
+	Position int32
+}
+
+type ModelPrice struct {
+	ID            int64
+	BillingModel  string
+	ScopeKind     string
+	ScopeID       *string
+	Currency      string
+	Rates         []byte
+	EffectiveFrom time.Time
+	EffectiveTo   *time.Time
+	Source        string
+	AppliedBy     string
+	Note          string
+	CreatedAt     time.Time
+}
+
+type ModelStat struct {
+	ModelID                   int64
+	Day                       pgtype.Date
+	Requests                  int64
+	Tokens                    int64
+	InputTokens               int64
+	OutputTokens              int64
+	UpstreamCostNano          int64
+	ChargedAmountNano         int64
+	P50LatencyMs              pgtype.Numeric
+	P95LatencyMs              pgtype.Numeric
+	ThroughputTokensPerSecond pgtype.Numeric
 }
 
 type OauthIdentity struct {
@@ -67,6 +181,17 @@ type PlatformMetum struct {
 	Key       string
 	Value     []byte
 	UpdatedAt time.Time
+}
+
+type Provider struct {
+	ID          int64
+	Slug        string
+	Name        string
+	Kind        string
+	LogoUrl     string
+	Description string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type Session struct {

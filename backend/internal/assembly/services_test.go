@@ -10,19 +10,19 @@ import (
 )
 
 func TestBuildMonolith(t *testing.T) {
-	svcs, err := Build(&config.Config{Topology: config.TopologyMonolith})
+	svcs, err := Build(&config.Config{Topology: config.TopologyMonolith}, Deps{})
 	require.NoError(t, err)
 	assert.Equal(t, config.TopologyMonolith, svcs.Topology)
 }
 
 func TestBuildSplit(t *testing.T) {
-	svcs, err := Build(&config.Config{Topology: config.TopologySplit})
+	svcs, err := Build(&config.Config{Topology: config.TopologySplit}, Deps{})
 	require.NoError(t, err)
 	assert.Equal(t, config.TopologySplit, svcs.Topology)
 }
 
 func TestBuildRejectsUnknownTopology(t *testing.T) {
-	_, err := Build(&config.Config{Topology: "cluster"})
+	_, err := Build(&config.Config{Topology: "cluster"}, Deps{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown topology")
 }

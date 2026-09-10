@@ -17,7 +17,10 @@ package assembly
 import (
 	"fmt"
 
+	"github.com/WALLE-AI/uMaaS/backend/internal/catalog"
+	"github.com/WALLE-AI/uMaaS/backend/internal/catalogadmin"
 	"github.com/WALLE-AI/uMaaS/backend/internal/config"
+	"github.com/WALLE-AI/uMaaS/backend/internal/pricing"
 )
 
 // Services 是全部跨模块服务的集合。模块之间只通过这里的接口通信，
@@ -25,10 +28,20 @@ import (
 type Services struct {
 	Topology config.Topology
 
+	// Catalog 是目录的只读服务（I2 / B2）。**它可以远程化**：
+	// 全是只读查询，没有跨模块事务，是最先能被拆出去的一块。
+	Catalog *catalog.Service
+	// Pricing 是价目解析器（I2 / M1）。展示侧与结算侧共用同一个实例——
+	// 这是"展示价与计费价同源"在装配层的落点（BILLING-AND-PRICING.md §3.6-②）。
+	//
+	// **注意它现在不是 TransactionalService**：解析价目只是读。
+	// I5 的结算服务才是，那时要把它加进 transactionalServices()。
+	Pricing *pricing.Resolver
+	// CatalogAdmin 是目录与价目的写入侧（I2 / M1a）。
+	CatalogAdmin *catalogadmin.Service
+
 	// 后续迭代逐个填充：
 	//   Quota   QuotaService     // I5，计费。TransactionalService，永不远程
-	//   Catalog CatalogService   // I2
-	//   Pricing PricingService   // I2
 	//   Infra   InfraService     // I7
 }
 
@@ -46,9 +59,22 @@ type TransactionalService interface {
 	ServiceName() string
 }
 
+// Deps 是装配需要的外部依赖。由 main 注入，避免 assembly 依赖 store——
+// 那会让"装配层决定拓扑"变成"装配层知道数据库"。
+type Deps struct {
+	Catalog      *catalog.Service
+	Pricing      *pricing.Resolver
+	CatalogAdmin *catalogadmin.Service
+}
+
 // Build 按配置装配服务集合。
-func Build(cfg *config.Config) (*Services, error) {
-	svcs := &Services{Topology: cfg.Topology}
+func Build(cfg *config.Config, deps Deps) (*Services, error) {
+	svcs := &Services{
+		Topology:     cfg.Topology,
+		Catalog:      deps.Catalog,
+		Pricing:      deps.Pricing,
+		CatalogAdmin: deps.CatalogAdmin,
+	}
 
 	switch cfg.Topology {
 	case config.TopologyMonolith:

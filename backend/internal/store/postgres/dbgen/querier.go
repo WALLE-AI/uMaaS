@@ -9,7 +9,14 @@ import (
 )
 
 type Querier interface {
+	CatalogCounts(ctx context.Context) (CatalogCountsRow, error)
+	// 改价 = 关闭旧版本 + 插入新版本（§3.3-1）。**绝不原地 UPDATE 费率**：
+	// 那会让历史账单在改价当天被静默重算成另一个数字。
+	ClosePriceVersions(ctx context.Context, arg ClosePriceVersionsParams) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
+	// "近 7 日有真实调用量"决定改价是否需要二次确认与强制 note（§3.6-⑥）。
+	// B3 之前 model_stats 是空的，此时返回 0 是**事实**而不是兜底。
+	CountRecentCalls(ctx context.Context, modelID int64) (CountRecentCallsRow, error)
 	// 平台管理员。与 users 完全独立的一套（ARCHITECTURE.md §4.5）。
 	CreateAdminAccount(ctx context.Context, arg CreateAdminAccountParams) (AdminAccount, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) (AdminSession, error)
@@ -24,7 +31,15 @@ type Querier interface {
 	DisableAdmin(ctx context.Context, id int64) error
 	GetAdminByEmail(ctx context.Context, lower string) (AdminAccount, error)
 	GetAdminByID(ctx context.Context, id int64) (AdminAccount, error)
+	GetAdminModelByID(ctx context.Context, id int64) (GetAdminModelByIDRow, error)
+	GetAdminModelByPath(ctx context.Context, arg GetAdminModelByPathParams) (GetAdminModelByPathRow, error)
 	GetAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetAdminSessionByTokenHashRow, error)
+	GetBenchmarkBySlug(ctx context.Context, slug string) (GetBenchmarkBySlugRow, error)
+	GetDocsPage(ctx context.Context, slug string) (GetDocsPageRow, error)
+	// 详情页。与 ListModels 取价格的方式**必须一致**——同一个函数，同一个 scope。
+	GetModelByPath(ctx context.Context, arg GetModelByPathParams) (GetModelByPathRow, error)
+	GetPriceVersionByID(ctx context.Context, id int64) (ModelPrice, error)
+	GetProviderBySlug(ctx context.Context, slug string) (Provider, error)
 	// 一次查询同时拿到会话与用户：会话校验在每个请求上都要跑，
 	// 分两次查等于把控制平面的 QPS 乘以 2。
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error)
@@ -33,16 +48,94 @@ type Querier interface {
 	GetUserByOAuthIdentity(ctx context.Context, arg GetUserByOAuthIdentityParams) (User, error)
 	GetWorkspaceByID(ctx context.Context, id int64) (Workspace, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
+	InsertModelActivity(ctx context.Context, arg InsertModelActivityParams) error
+	InsertPriceVersion(ctx context.Context, arg InsertPriceVersionParams) (ModelPrice, error)
+	// admin 看得到全部四态；web 只看得到 listed。
+	ListAdminModels(ctx context.Context, status *string) ([]ListAdminModelsRow, error)
 	ListAdmins(ctx context.Context) ([]AdminAccount, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
+	// rank 在查询里算：让 Go 侧再排一遍等于给"两处排序不一致"留位置。
+	ListBenchmarkResults(ctx context.Context, benchmarkIds []int64) ([]ListBenchmarkResultsRow, error)
+	// ── 评测 ──────────────────────────────────────────────────────
+	ListBenchmarks(ctx context.Context, category *string) ([]ListBenchmarksRow, error)
+	// ── 文档 ──────────────────────────────────────────────────────
+	ListDocsNavigation(ctx context.Context) ([]ListDocsNavigationRow, error)
+	ListFeaturedModelIDs(ctx context.Context, rowLimit int32) ([]int64, error)
 	ListMembershipsByUser(ctx context.Context, userID int64) ([]ListMembershipsByUserRow, error)
+	ListModelActivity(ctx context.Context, arg ListModelActivityParams) ([]ListModelActivityRow, error)
+	ListModelBenchmarkScores(ctx context.Context, modelID int64) ([]ListModelBenchmarkScoresRow, error)
+	ListModelFAQ(ctx context.Context, modelID int64) ([]ListModelFAQRow, error)
+	// 精选模型、评测优胜者、榜单条目、相关模型都要嵌一个 ModelSummary。
+	// 走同一个查询，避免"首页的价格"与"列表页的价格"各查各的。
+	ListModelSummariesByIDs(ctx context.Context, ids []int64) ([]ListModelSummariesByIDsRow, error)
+	// 目录只读查询（B2）。
+	//
+	// 两条纪律贯穿本文件：
+	//
+	//  1. **价格一律通过 pricing_effective_version() 取**，没有任何查询自己写
+	//     "当前生效版本"的 WHERE 子句（理由见迁移里那个函数的注释，以及 M1b）。
+	//  2. **可空的联接结果一律用 to_jsonb() 整体带出**。价目与统计都可能不存在，
+	//     而"没有价目"与"价格为 0"、"没有遥测"与"吞吐为 0"在展示上是完全不同的两件事；
+	//     摊成一堆列会逼着每一列都取一个哨兵值，那正是 null 被当成 0 的起点。
+	// 目录列表：过滤 + 排序 + 游标分页，一条 SQL 全包。
+	//
+	// 排序键归一化成 double precision 后乘方向系数（asc=1 / desc=-1），
+	// 于是"两种方向 × 四种排序键"塌缩成同一个 `ORDER BY sort_key, id`，
+	// 游标比较也退化成一个无 NULL 的二元组比较。
+	// 没有价格的模型，排序键取 ±Infinity——契约写死了 **null 恒排在最后，
+	// 且 null ≠ 0**；把未定价的模型排成"免费"是最贵的一类展示错误。
+	ListModels(ctx context.Context, arg ListModelsParams) ([]ListModelsRow, error)
+	ListPriceVersions(ctx context.Context, arg ListPriceVersionsParams) ([]ModelPrice, error)
+	// 同厂商优先，其次同能力。**不做"你可能还喜欢"式的推荐**：
+	// 那需要行为数据，而我们现在没有，猜出来的相关性会被当成事实。
+	ListRelatedModelIDs(ctx context.Context, arg ListRelatedModelIDsParams) ([]int64, error)
+	// 质量分 / 吞吐 / 上下文长度 / 输入单价，四个维度共用一条查询。
+	// 拆成四条会让"某个维度悄悄换了口径"变得极难发现。
+	RankModelsByColumn(ctx context.Context, arg RankModelsByColumnParams) ([]RankModelsByColumnRow, error)
+	// ── 榜单 ──────────────────────────────────────────────────────
+	RankModelsByUsage(ctx context.Context, arg RankModelsByUsageParams) ([]RankModelsByUsageRow, error)
+	// 价目查询（M1 / M1a / M1b）。
+	//
+	// **本文件是价目的唯一 SQL 入口。** catalog 侧只在 catalog.sql 里通过同一个
+	// pricing_effective_version() 取默认档价格用于排序过滤，展示与结算的费率解析
+	// 都走 internal/pricing 的同一个 Go 函数（计价 §3.6-②）。
+	// 价目解析的**唯一实现**。四层优先级（计价 §3.4）：
+	//
+	//     workspace 专属协议价 > plan 价目 > 计费别名默认价 > 模型默认价
+	//
+	// 每一层是**整体覆盖**，不是字段级合并。字段级合并看起来灵活，
+	// 实际会产生"没人能说清这个模型现在多少钱"的价目，排查成本极高。
+	//
+	// at 由调用方给：结算必须传 RequestContext.ReceivedAt 而不是 now()，
+	// 否则一次跨越改价时刻的长流会中途换价（§3.3-3）。
+	ResolvePriceVersion(ctx context.Context, arg ResolvePriceVersionParams) (ModelPrice, error)
 	RevokeAdminSession(ctx context.Context, tokenHash []byte) error
 	RevokeAllAdminSessions(ctx context.Context, adminID int64) error
 	RevokeAllUserSessions(ctx context.Context, userID int64) error
 	RevokeSession(ctx context.Context, tokenHash []byte) error
+	// ILIKE 而不是 to_tsvector：默认的分词配置对中文正文只会切出整段，
+	// 装 pg_jieba/zhparser 又是一个部署依赖。目录规模下 ILIKE 足够，
+	// 换成全文检索时这里是唯一的改动点。
+	SearchDocs(ctx context.Context, arg SearchDocsParams) ([]SearchDocsRow, error)
 	SetAdminTOTP(ctx context.Context, arg SetAdminTOTPParams) error
+	// 开发种子数据的写入（`umaas seed catalog`）。
+	//
+	// **这些查询只服务开发环境**，seed 命令在 env=prod 时直接拒绝执行。
+	// 它们写的都是"展示层属性"（精选位、质量分、评测结果、文档），
+	// 唯独不写价目——价目只能走 pricing.sql 的那条路径（计价 §3.6-①）。
+	SetModelPresentation(ctx context.Context, arg SetModelPresentationParams) error
+	SetModelStatus(ctx context.Context, arg SetModelStatusParams) (Model, error)
 	TouchAdminActivity(ctx context.Context, id int64) error
+	UpsertBenchmark(ctx context.Context, arg UpsertBenchmarkParams) (int64, error)
+	UpsertBenchmarkResult(ctx context.Context, arg UpsertBenchmarkResultParams) error
+	UpsertDocsPage(ctx context.Context, arg UpsertDocsPageParams) error
+	// **status 不在 SET 列表里**：发布/下架是独立的、要校验价目完整性的动作，
+	// 不能被一次元数据编辑顺手带过去（计价 §3.6-③）。
+	UpsertModel(ctx context.Context, arg UpsertModelParams) (Model, error)
+	UpsertModelFAQ(ctx context.Context, arg UpsertModelFAQParams) error
 	UpsertOAuthIdentity(ctx context.Context, arg UpsertOAuthIdentityParams) error
+	// ── admin 写入口（M1a）─────────────────────────────────────────
+	UpsertProvider(ctx context.Context, arg UpsertProviderParams) (Provider, error)
 }
 
 var _ Querier = (*Queries)(nil)

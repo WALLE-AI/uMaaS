@@ -20,12 +20,17 @@ import (
 
 	"github.com/WALLE-AI/uMaaS/backend/internal/assembly"
 	"github.com/WALLE-AI/uMaaS/backend/internal/auth"
+	"github.com/WALLE-AI/uMaaS/backend/internal/catalog"
+	"github.com/WALLE-AI/uMaaS/backend/internal/catalogadmin"
 	"github.com/WALLE-AI/uMaaS/backend/internal/config"
 	"github.com/WALLE-AI/uMaaS/backend/internal/gateway"
 	"github.com/WALLE-AI/uMaaS/backend/internal/httpapi"
+	admincatalogapi "github.com/WALLE-AI/uMaaS/backend/internal/httpapi/admincatalog"
 	authapi "github.com/WALLE-AI/uMaaS/backend/internal/httpapi/auth"
+	catalogapi "github.com/WALLE-AI/uMaaS/backend/internal/httpapi/catalog"
 	"github.com/WALLE-AI/uMaaS/backend/internal/observ"
 	"github.com/WALLE-AI/uMaaS/backend/internal/platform"
+	"github.com/WALLE-AI/uMaaS/backend/internal/pricing"
 	"github.com/WALLE-AI/uMaaS/backend/internal/store"
 	"github.com/WALLE-AI/uMaaS/backend/internal/store/postgres"
 )
@@ -45,6 +50,9 @@ func run() error {
 	// 因为子命令有自己的 flag 集合。
 	if len(os.Args) > 1 && os.Args[1] == "admin" {
 		return runAdminCommand(os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "seed" {
+		return runSeedCommand(os.Args[2:])
 	}
 
 	configPath := flag.String("config", "", "path to config file (optional; env vars still apply)")
@@ -92,7 +100,19 @@ func run() error {
 	}
 	defer db.Close()
 
-	services, err := assembly.Build(cfg)
+	// 目录与价目（I2）。**Resolver 只建一个实例**并同时交给展示侧与将来的
+	// 结算侧：这是"展示价与计费价同源"的装配落点（BILLING-AND-PRICING.md §3.6-②）。
+	pricingRepo := postgres.NewPricingRepo(db)
+	resolver := pricing.NewResolver(pricingRepo)
+	catalogService := catalog.NewService(postgres.NewCatalogRepo(db))
+	auditRepo := postgres.NewAuditRepo(db)
+	catalogAdminService := catalogadmin.NewService(postgres.NewCatalogAdminRepo(db), auditRepo)
+
+	services, err := assembly.Build(cfg, assembly.Deps{
+		Catalog:      catalogService,
+		Pricing:      resolver,
+		CatalogAdmin: catalogAdminService,
+	})
 	if err != nil {
 		return err
 	}
@@ -113,7 +133,7 @@ func run() error {
 	authService := auth.NewService(
 		postgres.NewIdentityRepo(db),
 		postgres.NewAdminRepo(db),
-		postgres.NewAuditRepo(db),
+		auditRepo,
 		cipher,
 	)
 	authHandler := authapi.New(authService, cfg.Security.SecureCookies)
@@ -143,12 +163,14 @@ func run() error {
 
 	if cfg.ControlPlane.Enabled {
 		srv := newServer(cfg.ControlPlane, httpapi.NewRouter(httpapi.Deps{
-			Config:   cfg,
-			Services: services,
-			Health:   db.Health,
-			Version:  version,
-			Auth:     authHandler,
-			Metrics:  httpMetrics,
+			Config:       cfg,
+			Services:     services,
+			Health:       db.Health,
+			Version:      version,
+			Auth:         authHandler,
+			Catalog:      catalogapi.New(catalogService),
+			AdminCatalog: admincatalogapi.New(catalogAdminService),
+			Metrics:      httpMetrics,
 		}))
 		servers = append(servers, srv)
 		g.Go(func() error { return serve(gctx, logger, "control-plane", srv) })

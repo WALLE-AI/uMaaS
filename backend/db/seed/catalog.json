@@ -1,0 +1,216 @@
+{
+  "_comment": [
+    "开发与冒烟用的种子数据。**不是生产数据**——生产的目录由 admin 逐条录入",
+    "（BILLING-AND-PRICING.md §3.6-①：admin 是价目的唯一写入口）。",
+    "价格全部是示意值，不代表任何厂商的真实标价。",
+    "自建模型故意留在 draft 且没有价目：§11-G 的对标关系还没给出，",
+    "而无价可计的 canary 模型每一个请求都是白送且事后无法追补。"
+  ],
+  "providers": [
+    { "slug": "openai", "name": "OpenAI", "kind": "cloud", "logo_url": "/logos/openai.svg" },
+    { "slug": "anthropic", "name": "Anthropic", "kind": "cloud", "logo_url": "/logos/anthropic.svg" },
+    { "slug": "google", "name": "Google", "kind": "cloud", "logo_url": "/logos/google.svg" },
+    { "slug": "selfhosted", "name": "自建", "kind": "self_hosted", "logo_url": "/logos/umaas.svg" }
+  ],
+  "models": [
+    {
+      "provider": "openai",
+      "slug": "gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "description": "通用旗舰模型，长上下文与工具调用表现均衡。",
+      "modalities": ["text", "image"],
+      "capabilities": ["reasoning", "tools", "vision", "cache"],
+      "context_length": 400000,
+      "max_output_tokens": 32768,
+      "architecture": "混合专家",
+      "input_formats": ["text", "image"],
+      "output_formats": ["text"],
+      "supported_parameters": ["temperature", "top_p", "tools", "response_format", "stream"],
+      "hosting": "cloud",
+      "featured": true,
+      "featured_rank": 1,
+      "quality_score": 92.4,
+      "released_at": "2026-08-14T00:00:00Z",
+      "status": "listed",
+      "rates": {
+        "input": { "per_million_nano": 1250000000 },
+        "output": { "per_million_nano": 10000000000 },
+        "cache_read": { "per_million_nano": 125000000 },
+        "reasoning": { "same_as": "output" }
+      },
+      "note": "示意价格，非厂商真实标价"
+    },
+    {
+      "provider": "anthropic",
+      "slug": "claude-opus-5",
+      "name": "Claude Opus 5",
+      "description": "长任务与代码库级改动上表现突出，缓存写入分 5m / 1h 两档计价。",
+      "modalities": ["text", "image"],
+      "capabilities": ["reasoning", "tools", "vision", "cache"],
+      "context_length": 1000000,
+      "max_output_tokens": 64000,
+      "input_formats": ["text", "image"],
+      "output_formats": ["text"],
+      "supported_parameters": ["temperature", "top_p", "tools", "stream"],
+      "hosting": "cloud",
+      "featured": true,
+      "featured_rank": 2,
+      "quality_score": 94.1,
+      "released_at": "2026-07-02T00:00:00Z",
+      "status": "listed",
+      "rates": {
+        "input": { "per_million_nano": 3000000000 },
+        "output": { "per_million_nano": 15000000000 },
+        "cache_read": { "per_million_nano": 300000000 },
+        "cache_write": [
+          { "ttl": "5m", "per_million_nano": 3750000000 },
+          { "ttl": "1h", "per_million_nano": 6000000000 }
+        ],
+        "reasoning": { "same_as": "output" }
+      },
+      "note": "示意价格，缓存写入两档对应上游的 5m / 1h"
+    },
+    {
+      "provider": "google",
+      "slug": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "description": "低延迟高吞吐，超长上下文走分档价。",
+      "modalities": ["text", "image", "audio"],
+      "capabilities": ["tools", "vision", "cache"],
+      "context_length": 2000000,
+      "max_output_tokens": 8192,
+      "input_formats": ["text", "image", "audio"],
+      "output_formats": ["text"],
+      "supported_parameters": ["temperature", "top_p", "tools", "stream"],
+      "hosting": "cloud",
+      "featured": true,
+      "featured_rank": 3,
+      "quality_score": 86.7,
+      "released_at": "2026-09-01T00:00:00Z",
+      "status": "listed",
+      "rates": {
+        "input": { "per_million_nano": 150000000 },
+        "output": { "per_million_nano": 600000000 },
+        "cache_read": { "per_million_nano": 37500000 },
+        "tiers": [
+          {
+            "above_tokens": 200000,
+            "input_per_million_nano": 300000000,
+            "output_per_million_nano": 1200000000
+          }
+        ]
+      },
+      "note": "示意价格；超过 200k 输入后单价翻倍，与上游的长上下文分档一致"
+    },
+    {
+      "provider": "openai",
+      "slug": "text-embed-4",
+      "name": "Text Embed 4",
+      "description": "通用文本嵌入模型。",
+      "modalities": ["embedding"],
+      "capabilities": [],
+      "context_length": 8192,
+      "input_formats": ["text"],
+      "output_formats": ["embedding"],
+      "supported_parameters": ["dimensions"],
+      "hosting": "cloud",
+      "open_weights": false,
+      "released_at": "2026-03-11T00:00:00Z",
+      "status": "listed",
+      "rates": {
+        "input": { "per_million_nano": 20000000 },
+        "output": { "per_million_nano": 0 }
+      },
+      "note": "示意价格；嵌入模型没有输出计费，output 显式写 0 而不是省略"
+    },
+    {
+      "provider": "selfhosted",
+      "slug": "qwen3-max",
+      "name": "Qwen3 Max（自建）",
+      "description": "自建 GPU 集群上的开放权重模型。",
+      "modalities": ["text"],
+      "capabilities": ["reasoning", "tools"],
+      "context_length": 131072,
+      "max_output_tokens": 16384,
+      "input_formats": ["text"],
+      "output_formats": ["text"],
+      "supported_parameters": ["temperature", "top_p", "stream"],
+      "hosting": "self",
+      "open_weights": true,
+      "released_at": "2026-06-20T00:00:00Z",
+      "status": "draft",
+      "rates": null,
+      "note": "对标关系与折扣系数（×0.7）尚未逐个给出，因此停在 draft。见计价方案 §11-G"
+    }
+  ],
+  "benchmarks": [
+    {
+      "slug": "agent-suite",
+      "name": "Agent Suite",
+      "category": "agent",
+      "description": "多轮工具调用与长任务完成率。",
+      "methodology": "每个模型跑 120 个任务，统计完成率与端到端时长；失败重试一次。",
+      "configuration": { "tasks": 120, "max_retries": 1, "timeout_s": 300 },
+      "run_count": 6,
+      "last_run_at": "2026-09-05T00:00:00Z",
+      "results": [
+        { "model": "openai/gpt-5.6-sol", "score": 88.5, "percentile": 96, "cost_nano": 4200000000, "duration_ms": 91000, "sample_count": 120 },
+        { "model": "anthropic/claude-opus-5", "score": 91.2, "percentile": 99, "cost_nano": 9100000000, "duration_ms": 128000, "sample_count": 120 },
+        { "model": "google/gemini-3.8-flash", "score": 79.4, "percentile": 82, "cost_nano": 700000000, "duration_ms": 42000, "sample_count": 120 }
+      ]
+    },
+    {
+      "slug": "code-refactor",
+      "name": "Code Refactor",
+      "category": "coding",
+      "description": "真实仓库上的跨文件重构任务。",
+      "methodology": "在 40 个开源仓库上执行重构，以测试是否通过为判据。",
+      "configuration": { "repos": 40, "language": "mixed" },
+      "run_count": 3,
+      "last_run_at": "2026-08-28T00:00:00Z",
+      "results": [
+        { "model": "anthropic/claude-opus-5", "score": 84.0, "percentile": 97, "cost_nano": 6400000000, "duration_ms": 210000, "sample_count": 40 },
+        { "model": "openai/gpt-5.6-sol", "score": 81.5, "percentile": 93, "cost_nano": 3900000000, "duration_ms": 176000, "sample_count": 40 }
+      ]
+    }
+  ],
+  "faq": [
+    {
+      "model": "openai/gpt-5.6-sol",
+      "items": [
+        { "question": "如何调用该模型？", "answer": "使用 uMaaS 的 OpenAI 兼容端点，把 model 设为上方的模型 ID。" },
+        { "question": "会自动故障转移吗？", "answer": "默认启用。也可以在请求参数中锁定供应商或区域。" }
+      ]
+    }
+  ],
+  "docs": [
+    {
+      "slug": "quickstart",
+      "group": "开始",
+      "group_position": 1,
+      "position": 1,
+      "title": "快速开始",
+      "description": "五分钟内发出第一个请求。",
+      "badge": "新",
+      "body": "# 快速开始\n\n## 获取 API Key\n\n在控制台的 API Keys 页面创建一个密钥。**密钥只展示一次**，服务端只存哈希与前缀。\n\n## 发出第一个请求\n\n```bash\ncurl https://api.umaas.dev/v1/chat/completions \\\n  -H \"Authorization: Bearer $UMAAS_API_KEY\" \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"model\":\"openai/gpt-5.6-sol\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}'\n```\n\n## 流式响应\n\n加上 `\"stream\": true` 即可。SSE 会原样透传，不包任何信封。\n"
+    },
+    {
+      "slug": "pricing",
+      "group": "计费",
+      "group_position": 2,
+      "position": 1,
+      "title": "计费口径",
+      "description": "按什么算钱、按谁的数算。",
+      "body": "# 计费口径\n\n## 计价单元\n\n输入、输出、缓存读取、缓存写入、推理 token 分开计价。**未列出的计价单元不计费**，而不是按 0 计费——两者在用量明细里可以区分。\n\n## 用量以谁为准\n\n上游返回的 usage 一律以上游为准，即使我们认为它算错了；上游不返回时用本地 tokenizer 估算，并在明细里标注为估算条目。\n\n## 价格变更\n\n价目是版本化的。一次请求整体按**受理时**的价目结算，跨越改价时刻的长请求不会中途换价。\n"
+    },
+    {
+      "slug": "routing",
+      "group": "计费",
+      "group_position": 2,
+      "position": 2,
+      "title": "路由与价格的关系",
+      "description": "为什么同一个模型价格不随路由变化。",
+      "body": "# 路由与价格的关系\n\n售价锚定模型的计费身份，**与实际路由到哪个供给完全无关**。\n\n这意味着同一个 prompt 两次调用价格一定相同，无论它被路由到了哪家上游或我们自建的 GPU 集群。\n"
+    }
+  ]
+}

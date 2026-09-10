@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 func newControlPlane(t *testing.T, health func(context.Context) error) http.Handler {
 	t.Setenv("UMAAS_DATABASE__DSN", "postgres://localhost/umaas_test")
 	cfg := testConfig()
-	svcs, err := assembly.Build(cfg)
+	svcs, err := assembly.Build(cfg, assembly.Deps{})
 	require.NoError(t, err)
 	return httpapi.NewRouter(httpapi.Deps{
 		Config: cfg, Services: svcs, Health: health, Version: "test",
@@ -118,7 +118,7 @@ func TestMaliciousRequestIDRejected(t *testing.T) {
 func TestDataPlaneDoesNotWrapInEnvelope(t *testing.T) {
 	t.Setenv("UMAAS_DATABASE__DSN", "postgres://localhost/umaas_test")
 	cfg := testConfig()
-	svcs, err := assembly.Build(cfg)
+	svcs, err := assembly.Build(cfg, assembly.Deps{})
 	require.NoError(t, err)
 	h := gateway.NewRouter(gateway.Deps{Config: cfg, Services: svcs, Version: "test"})
 

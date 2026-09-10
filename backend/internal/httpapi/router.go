@@ -12,7 +12,9 @@ import (
 
 	"github.com/WALLE-AI/uMaaS/backend/internal/assembly"
 	"github.com/WALLE-AI/uMaaS/backend/internal/config"
+	admincatalogapi "github.com/WALLE-AI/uMaaS/backend/internal/httpapi/admincatalog"
 	authapi "github.com/WALLE-AI/uMaaS/backend/internal/httpapi/auth"
+	catalogapi "github.com/WALLE-AI/uMaaS/backend/internal/httpapi/catalog"
 	"github.com/WALLE-AI/uMaaS/backend/internal/httpapi/middleware"
 	"github.com/WALLE-AI/uMaaS/backend/internal/httpapi/response"
 	"github.com/WALLE-AI/uMaaS/backend/internal/observ"
@@ -29,6 +31,11 @@ type Deps struct {
 	// Auth 是身份端点与会话中间件。为 nil 时 /auth/* 与 /me 不挂载
 	// （单元测试里常用）。
 	Auth *authapi.Handler
+	// Catalog 是公开目录端点（I2 / B2）。
+	Catalog *catalogapi.Handler
+	// AdminCatalog 是 admin 的目录与价目写端点（I2 / M1a）。
+	// 它挂在 RequireAdmin 之后，因此 Auth 为 nil 时不会被挂载。
+	AdminCatalog *admincatalogapi.Handler
 	// Metrics 为 nil 时不记指标。
 	Metrics *observ.HTTPMetrics
 }
@@ -95,13 +102,23 @@ func NewRouter(deps Deps) http.Handler {
 			// 管理端自成一套鉴权链（ARCHITECTURE.md §4.5）。
 			r.Route("/admin", func(r chi.Router) {
 				r.Route("/auth", deps.Auth.AdminRoutes)
-				// I6 起，其余 /admin/* 端点挂在这个组下：
-				//   r.Group(func(r chi.Router) { r.Use(deps.Auth.RequireAdmin); ... })
+
+				r.Group(func(r chi.Router) {
+					r.Use(deps.Auth.RequireAdmin)
+					if deps.AdminCatalog != nil {
+						r.Route("/catalog", deps.AdminCatalog.Routes)
+					}
+					// I6 起，其余 /admin/* 端点继续挂在这个组下。
+				})
 			})
 		}
 
-		// I2 起继续挂载：
-		//   r.Mount("/catalog", catalog.Routes(deps))
+		// 目录是**公开的**：未登录用户也要能浏览模型与价格
+		// （计价 §3.6-② 推论），所以挂在 RequireSession 之外。
+		if deps.Catalog != nil {
+			deps.Catalog.Routes(r)
+		}
+
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, r, notImplemented())
 		})
