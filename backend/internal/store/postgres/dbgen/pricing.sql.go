@@ -340,10 +340,13 @@ func (q *Queries) InsertPriceVersion(ctx context.Context, arg InsertPriceVersion
 
 const listAdminModels = `-- name: ListAdminModels :many
 SELECT m.id, m.provider_id, m.slug, m.display_name, m.description, m.logo_url, m.modalities, m.capabilities, m.context_length, m.max_output_tokens, m.architecture, m.input_formats, m.output_formats, m.supported_parameters, m.zero_data_retention, m.open_weights, m.hosting, m.billing_model, m.status, m.canary_percent, m.featured, m.featured_rank, m.quality_score, m.released_at, m.created_at, m.updated_at, p.slug AS provider_slug, p.name AS provider_name,
-       pricing_effective_version(m.billing_model, 'default', NULL, now()) AS price_version_id,
+       to_jsonb(pv.id) AS price_version_id,
        (SELECT coalesce(sum(s.requests), 0)::bigint FROM model_stats s
          WHERE s.model_id = m.id AND s.day >= (current_date - 7)) AS calls_last_7d
 FROM models m JOIN providers p ON p.id = m.provider_id
+LEFT JOIN LATERAL (
+    SELECT pricing_effective_version(m.billing_model, 'default', NULL, now()) AS id
+) pv ON true
 WHERE $1::text IS NULL OR m.status = $1
 ORDER BY p.slug, m.slug
 `
@@ -377,11 +380,15 @@ type ListAdminModelsRow struct {
 	UpdatedAt           time.Time
 	ProviderSlug        string
 	ProviderName        string
-	PriceVersionID      int64
+	PriceVersionID      []byte
 	CallsLast7d         int64
 }
 
 // admin 看得到全部四态；web 只看得到 listed。
+// price_version_id 走 LEFT JOIN LATERAL 而不是直接调用函数：直接调用会被
+// sqlc 推断成 NOT NULL bigint（函数签名如此），draft 模型没有价目时
+// 会在扫描阶段报 "cannot scan NULL into *int64"——这条路径只有在真的存在
+// 一个没有价目的模型时才会被触发，冒烟测试的种子数据没覆盖到就会漏网。
 func (q *Queries) ListAdminModels(ctx context.Context, status *string) ([]ListAdminModelsRow, error) {
 	rows, err := q.db.Query(ctx, listAdminModels, status)
 	if err != nil {

@@ -75,6 +75,37 @@ type BenchmarkResult struct {
 	RunAt       time.Time
 }
 
+type Channel struct {
+	ID                   int64
+	ProviderProfileID    int64
+	Name                 string
+	BaseUrlOverride      *string
+	CredentialsEnc       []byte
+	Region               string
+	Priority             int32
+	Weight               int32
+	Status               string
+	HealthAlpha          float64
+	HealthBeta           float64
+	LatencyEmaMs         *float64
+	ConsecutiveFailures  int32
+	RateLimitedUntil     *time.Time
+	ProbeIntervalSeconds int32
+	LastProbeAt          *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+type ChannelModel struct {
+	ChannelID         int64
+	ModelID           int64
+	UpstreamModelName string
+	Enabled           bool
+	PriorityOverride  *int32
+	WeightOverride    *int32
+	IsProbe           bool
+}
+
 type DocsPage struct {
 	ID            int64
 	Slug          string
@@ -192,6 +223,93 @@ type Provider struct {
 	Description string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type ProviderProfile struct {
+	ID         int64
+	Slug       string
+	Name       string
+	Protocol   string
+	BaseUrl    string
+	AuthScheme string
+	AuthHeader string
+	Quirks     []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type RequestLog struct {
+	ID                int64
+	RequestID         string
+	AttemptIndex      int32
+	IsFinal           bool
+	WorkspaceID       *int64
+	ApiKeyID          *int64
+	RequestedModel    string
+	BillingModel      string
+	UpstreamModel     string
+	ChannelName       string
+	PromptTokens      int64
+	CompletionTokens  int64
+	CacheReadTokens   int64
+	CacheWriteTokens  int64
+	ReasoningTokens   int64
+	ToolCallCount     int64
+	UsageSource       string
+	PriceVersionID    *int64
+	UpstreamCostNano  int64
+	ChargedAmountNano int64
+	CostEstimated     bool
+	TtftMs            *int32
+	LatencyMs         int32
+	StatusCode        int32
+	ErrorCode         string
+	AgentFramework    string
+	CreatedAt         time.Time
+	Origin            string
+	ChannelID         *int64
+}
+
+type RequestLogsDefault struct {
+	ID                int64
+	RequestID         string
+	AttemptIndex      int32
+	IsFinal           bool
+	WorkspaceID       *int64
+	ApiKeyID          *int64
+	RequestedModel    string
+	BillingModel      string
+	UpstreamModel     string
+	ChannelName       string
+	PromptTokens      int64
+	CompletionTokens  int64
+	CacheReadTokens   int64
+	CacheWriteTokens  int64
+	ReasoningTokens   int64
+	ToolCallCount     int64
+	UsageSource       string
+	PriceVersionID    *int64
+	UpstreamCostNano  int64
+	ChargedAmountNano int64
+	CostEstimated     bool
+	TtftMs            *int32
+	LatencyMs         int32
+	StatusCode        int32
+	ErrorCode         string
+	AgentFramework    string
+	CreatedAt         time.Time
+}
+
+type RoutingPolicy struct {
+	ID            int64
+	Name          string
+	ScopeKind     string
+	ScopeID       *string
+	Strategy      string
+	Weights       []byte
+	FallbackDepth int32
+	UpdatedBy     string
+	UpdatedAt     time.Time
 }
 
 type Session struct {

@@ -20,6 +20,12 @@ export UMAAS_CONTROL_PLANE__ADDR=":${CONTROL_ADDR##*:}"
 export UMAAS_DATA_PLANE__ADDR=":${DATA_ADDR##*:}"
 export UMAAS_OBSERVABILITY__METRICS_ADDR=":${METRICS_ADDR##*:}"
 export UMAAS_LOG__FORMAT=text
+# I3 起，数据平面启动需要一条渠道配置（ValidateGateway）。冒烟不起真实上游，
+# 这里给一个语法合法但连不通的地址——够验证"模型解析先于转发"这条路径，
+# 真正的转发/流式行为由 internal/gateway 的单元测试覆盖（含伪上游）。
+export UMAAS_GATEWAY__CHANNEL__BASE_URL="http://127.0.0.1:1"
+export UMAAS_GATEWAY__STREAM__FIRST_BYTE_TIMEOUT="2s"
+export UMAAS_GATEWAY__STREAM__STALL_TIMEOUT="2s"
 
 "./${BIN}/umaas" &
 PID=$!
@@ -110,4 +116,44 @@ CODE=$(curl -sS -o /dev/null -w '%{http_code}' -b "$JAR" \
 [[ "$CODE" == "401" ]] || fail "admin session accepted a user cookie (returned $CODE)"
 
 rm -f "$JAR"
-echo "SMOKE OK (monolith topology, I0+I1)"
+
+# ── I2 目录与价目 ───────────────────────────────────────────────
+# 判据取自 IMPLEMENTATION-PLAN.md 的 M1b："catalog 展示价与结算价
+# 共用同一个解析函数"——冒烟测试验证不了解析路径是不是同一个，
+# 但能验证公开端点可用、且价格字段不是硬编码的假数据。
+
+# 14. /catalog/summary 可用且带信封
+curl -fsS "http://${CONTROL_ADDR}/api/v1/catalog/summary" | grep -q '"model_count"' \
+  || fail "/catalog/summary did not return model_count"
+
+# 15. /models 支持排序与分页 meta
+curl -fsS "http://${CONTROL_ADDR}/api/v1/models?limit=1" | grep -q '"next_cursor"' \
+  || fail "/models response is missing meta.next_cursor"
+
+# 16. /docs/navigation 可用
+curl -fsS "http://${CONTROL_ADDR}/api/v1/docs/navigation" >/dev/null \
+  || fail "/docs/navigation is not reachable"
+
+# 17. admin 的目录端点在无会话时拒绝
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "http://${CONTROL_ADDR}/api/v1/admin/catalog/models")
+[[ "$CODE" == "401" ]] || fail "/admin/catalog/models without a session returned $CODE, expected 401"
+
+# ── I3 数据平面 MVP ─────────────────────────────────────────────
+# 判据取自 IMPLEMENTATION-PLAN.md 的 B3："SSE 正常；客户端断开能取消上游"。
+# 冒烟不接真实上游（那部分由 internal/gateway 的伪上游单测覆盖，
+# 含首字节/stall 两段超时与"绝不假装 finish_reason: stop"），这里只验证
+# 模型解析先于转发这条路径，以及数据平面**绝不包信封**这条硬约束。
+
+# 18. 未知模型返回 404，且是 OpenAI 形状（不是我们的信封）
+BODY=$(curl -sS -X POST "http://${DATA_ADDR}/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nonexistent/model","messages":[{"role":"user","content":"hi"}]}')
+echo "$BODY" | grep -q '"error"' || fail "unknown model did not return an OpenAI-shaped error"
+echo "$BODY" | grep -q '"data"' && fail "chat completions error response was wrapped in the control-plane envelope"
+
+# 19. 畸形请求体返回 400（仍是 OpenAI 形状）
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://${DATA_ADDR}/v1/chat/completions" \
+  -H 'Content-Type: application/json' -d '{"messages":[]}')
+[[ "$CODE" == "400" ]] || fail "malformed chat request returned $CODE, expected 400"
+
+echo "SMOKE OK (monolith topology, I0+I1+I2+I3)"

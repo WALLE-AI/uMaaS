@@ -105,11 +105,18 @@ WHERE p.slug = $1 AND m.slug = $2;
 
 -- name: ListAdminModels :many
 -- admin 看得到全部四态；web 只看得到 listed。
+-- price_version_id 走 LEFT JOIN LATERAL 而不是直接调用函数：直接调用会被
+-- sqlc 推断成 NOT NULL bigint（函数签名如此），draft 模型没有价目时
+-- 会在扫描阶段报 "cannot scan NULL into *int64"——这条路径只有在真的存在
+-- 一个没有价目的模型时才会被触发，冒烟测试的种子数据没覆盖到就会漏网。
 SELECT m.*, p.slug AS provider_slug, p.name AS provider_name,
-       pricing_effective_version(m.billing_model, 'default', NULL, now()) AS price_version_id,
+       to_jsonb(pv.id) AS price_version_id,
        (SELECT coalesce(sum(s.requests), 0)::bigint FROM model_stats s
          WHERE s.model_id = m.id AND s.day >= (current_date - 7)) AS calls_last_7d
 FROM models m JOIN providers p ON p.id = m.provider_id
+LEFT JOIN LATERAL (
+    SELECT pricing_effective_version(m.billing_model, 'default', NULL, now()) AS id
+) pv ON true
 WHERE sqlc.narg('status')::text IS NULL OR m.status = @status
 ORDER BY p.slug, m.slug;
 

@@ -13,11 +13,12 @@ import (
 	"github.com/WALLE-AI/uMaaS/backend/db/seed"
 	"github.com/WALLE-AI/uMaaS/backend/internal/catalogadmin"
 	"github.com/WALLE-AI/uMaaS/backend/internal/config"
+	"github.com/WALLE-AI/uMaaS/backend/internal/platform"
 	"github.com/WALLE-AI/uMaaS/backend/internal/store"
 	"github.com/WALLE-AI/uMaaS/backend/internal/store/postgres"
 )
 
-// runSeedCommand 实现 `umaas seed catalog`。
+// runSeedCommand 实现 `umaas seed catalog|channels`。
 //
 // # 为什么种子数据走 admin 的写入路径，而不是一段 INSERT
 //
@@ -27,39 +28,22 @@ import (
 // 副作用是：种子跑通本身就证明了写入路径能用。
 func runSeedCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: umaas seed catalog [--config <path>] [--file <path>]")
+		return errors.New("usage: umaas seed catalog|channels [--config <path>] [--file <path>]")
 	}
 	verb, rest := args[0], args[1:]
 	fs := flag.NewFlagSet("seed", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config file")
-	file := fs.String("file", "", "seed file (defaults to the embedded db/seed/catalog.json)")
+	file := fs.String("file", "", "seed file (defaults to the embedded db/seed data)")
 	_ = fs.Parse(rest)
-
-	if verb != "catalog" {
-		return fmt.Errorf("unknown seed subcommand %q; usage: umaas seed catalog", verb)
-	}
-
-	raw := seed.Catalog
-	if *file != "" {
-		b, err := os.ReadFile(*file)
-		if err != nil {
-			return fmt.Errorf("read seed file: %w", err)
-		}
-		raw = b
-	}
-	var data seedData
-	if err := json.Unmarshal(raw, &data); err != nil {
-		return fmt.Errorf("parse seed file: %w", err)
-	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
 	}
 	if cfg.Env == "prod" {
-		// 生产目录由 admin 逐条录入并留痕。一条命令灌进去的模型，
+		// 生产目录/渠道由 admin 逐条录入并留痕。一条命令灌进去的数据，
 		// audit_logs 里的 actor 会是 "seed"，而那是无法向审计解释的。
-		return errors.New("refusing to seed in prod; the catalog is entered through admin")
+		return errors.New("refusing to seed in prod; catalog and channel data are entered through admin")
 	}
 
 	ctx := context.Background()
@@ -69,9 +53,127 @@ func runSeedCommand(args []string) error {
 	}
 	defer db.Close()
 
-	svc := catalogadmin.NewService(postgres.NewCatalogAdminRepo(db), postgres.NewAuditRepo(db))
-	actor := catalogadmin.Actor{Label: "seed", RequestID: "seed"}
-	return data.apply(ctx, db, svc, actor)
+	switch verb {
+	case "catalog":
+		raw := seed.Catalog
+		if *file != "" {
+			b, err := os.ReadFile(*file)
+			if err != nil {
+				return fmt.Errorf("read seed file: %w", err)
+			}
+			raw = b
+		}
+		var data seedData
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return fmt.Errorf("parse seed file: %w", err)
+		}
+		svc := catalogadmin.NewService(postgres.NewCatalogAdminRepo(db), postgres.NewAuditRepo(db))
+		actor := catalogadmin.Actor{Label: "seed", RequestID: "seed"}
+		return data.apply(ctx, db, svc, actor)
+	case "channels":
+		raw := seed.Channels
+		if *file != "" {
+			b, err := os.ReadFile(*file)
+			if err != nil {
+				return fmt.Errorf("read seed file: %w", err)
+			}
+			raw = b
+		}
+		var data channelSeedData
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return fmt.Errorf("parse seed file: %w", err)
+		}
+		var cipher *platform.Cipher
+		if keyBytes, err := cfg.EncryptionKeyBytes(); err != nil {
+			return err
+		} else if len(keyBytes) > 0 {
+			if cipher, err = platform.NewCipher(keyBytes); err != nil {
+				return err
+			}
+		} else {
+			return errors.New("security.encryption_key is required to seed channel credentials")
+		}
+		return data.apply(ctx, postgres.NewRoutingRepo(db, cipher), postgres.NewCatalogAdminRepo(db))
+	default:
+		return fmt.Errorf("unknown seed subcommand %q; usage: umaas seed catalog|channels", verb)
+	}
+}
+
+// ── 渠道种子（P2 判据：接入一个 OpenAI 兼容厂商 = 数据，不是代码）──
+
+type channelSeedData struct {
+	Providers []struct {
+		Slug       string `json:"slug"`
+		Name       string `json:"name"`
+		Protocol   string `json:"protocol"`
+		BaseURL    string `json:"base_url"`
+		AuthScheme string `json:"auth_scheme"`
+		AuthHeader string `json:"auth_header"`
+	} `json:"providers"`
+	Channels []struct {
+		Provider string `json:"provider"`
+		Name     string `json:"name"`
+		APIKey   string `json:"api_key"`
+		Priority int32  `json:"priority"`
+		Weight   int32  `json:"weight"`
+		Models   []struct {
+			Model         string `json:"model"` // provider/slug，目录里的公开 ID
+			UpstreamModel string `json:"upstream_model"`
+			IsProbe       bool   `json:"is_probe"`
+		} `json:"models"`
+	} `json:"channels"`
+}
+
+func (d channelSeedData) apply(ctx context.Context, repo *postgres.RoutingRepo, models *postgres.CatalogAdminRepo) error {
+	byPublicID := map[string]int64{}
+	all, err := models.ListModels(ctx, "")
+	if err != nil {
+		return fmt.Errorf("list models for channel seed: %w", err)
+	}
+	for _, m := range all {
+		byPublicID[m.ProviderSlug+"/"+m.Slug] = m.ID
+	}
+
+	providerIDs := map[string]int64{}
+	for _, p := range d.Providers {
+		id, err := repo.UpsertProviderProfile(ctx, postgres.ProviderProfileInput{
+			Slug: p.Slug, Name: p.Name, Protocol: p.Protocol, BaseURL: p.BaseURL,
+			AuthScheme: p.AuthScheme, AuthHeader: p.AuthHeader,
+		})
+		if err != nil {
+			return fmt.Errorf("seed provider profile %s: %w", p.Slug, err)
+		}
+		providerIDs[p.Slug] = id
+	}
+
+	for _, c := range d.Channels {
+		providerID, ok := providerIDs[c.Provider]
+		if !ok {
+			return fmt.Errorf("channel %s references unknown provider %s", c.Name, c.Provider)
+		}
+		channelID, err := repo.CreateChannel(ctx, postgres.ChannelInput{
+			ProviderProfileID: providerID, Name: c.Name, APIKey: c.APIKey,
+			Priority: c.Priority, Weight: c.Weight,
+		})
+		if err != nil {
+			return fmt.Errorf("seed channel %s: %w", c.Name, err)
+		}
+		for _, m := range c.Models {
+			modelID, ok := byPublicID[m.Model]
+			if !ok {
+				return fmt.Errorf("channel %s references unknown model %s (seed catalog first)", c.Name, m.Model)
+			}
+			if err := repo.UpsertChannelModel(ctx, postgres.ChannelModelInput{
+				ChannelID: channelID, ModelID: modelID,
+				UpstreamModelName: m.UpstreamModel, IsProbe: m.IsProbe,
+			}); err != nil {
+				return fmt.Errorf("seed channel_model %s/%s: %w", c.Name, m.Model, err)
+			}
+		}
+	}
+
+	fmt.Printf("seeded %d provider profiles, %d channels\n", len(d.Providers), len(d.Channels))
+	return nil
 }
 
 // ── 种子文件的形状 ──────────────────────────────────────────────

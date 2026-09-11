@@ -1,6 +1,6 @@
 # 实施计划（任务级）
 
-> 状态：待评审 · 2026-09-09（G 序列已按 GPUStack 源码复核结果重估，见 §3-I7）
+> 状态：待评审 · 2026-09-11（I3 已完成；G 序列已按 GPUStack 源码复核结果重估，见 §3-I7）
 > 归属：`ARCHITECTURE.md` §9「分期实施」的展开
 > **本文是任务分解、依赖顺序、迭代边界与交付判据的真相源**。B/P/M/G/S 五条子序列的
 > 排期冲突在此裁决；各任务的**技术内容**仍以对应文档为准，本文只管"什么时候做、做完算什么"。
@@ -125,9 +125,30 @@
 
 ---
 
-### I2 · 目录与价目（约 3 周）
+### I2 · 目录与价目（约 3 周）· ✅ **已完成（2026-09-11）**
 
 **这是数据模型不可逆性最高的一个迭代。**
+
+> **交付**：`/catalog/summary`、`/models`、`/models/{p}/{m}`、`/benchmarks`、
+> `/benchmarks/{slug}`、`/rankings`、`/docs/*` 全部接真实数据；
+> `/admin/catalog/models` 的读写端点（含改价预检、发布/下架）可用。
+> 单测 + 对真实 Postgres 的手工验证全通过；`make ci` 全绿。
+>
+> **M1b 的落地方式**：不是"注意保持一致"，而是**同一个 Postgres 函数
+> `pricing_effective_version()`** 供 catalog 列表/详情排序过滤与 admin/结算
+> 共用，且 Go 侧只有一个 `pricing.ParseRates` / `Version.Charge`。
+> catalog 的价格来自随行 SQL 一起返回的 `to_jsonb(model_prices 行)`，
+> 用 `pricing.DecodeVersion` 还原——**不是第二条查询路径**。
+>
+> **冒烟阶段抓到一个真 bug**：`ListAdminModels` 直接把
+> `pricing_effective_version()` 的返回值当 `price_version_id` 列，
+> sqlc 按函数签名把它推断成 `NOT NULL bigint`；draft 模型（真实存在，
+> 参见种子数据里的自建模型）没有价目时该函数返回 NULL，
+> 扫描时直接报 `cannot scan NULL into *int64`。**只有真的存在一个无价模型
+> 的库才会触发**，用全带价目的种子数据测不出来。修法是让该列过一遍
+> `to_jsonb()`，在 Go 侧按 `*int64` 解析——这也是本文件里第二次因为
+> 同样的"函数返回值的可空性 sqlc 推断不出来"栽跟头（第一次见 I1 的 inet 列）。
+> 这条已经收进 `catalog.sql` / `pricing.sql` 顶部的注释里，作为这两个文件的写作纪律。
 
 | 任务 | 内容 | 出处 | 依赖 | 判据 |
 |---|---|---|---|---|
@@ -143,7 +164,37 @@
 
 ---
 
-### I3 · 数据平面 MVP（约 3 周）· **最高风险**
+### I3 · 数据平面 MVP（约 3 周）· **最高风险** · ✅ **已完成（2026-09-11）**
+
+> **交付**：`POST /v1/chat/completions`（含流式）单渠道直连可用；两段流式
+> 超时（首字节/stall）用一个可重置定时器实现；客户端断开会通过派生的
+> context 自动取消上游请求；`request_logs` 按 attempt 级记录写入
+> （异步 channel + `pgx.CopyFrom` 批量落库）。单测（含用真实 fake 上游
+> 服务器的集成测试）+ 对真实 Postgres 的手工验证全通过；`make ci` 全绿。
+>
+> **风险前置验证点已演示**：上游首字节前失败 → 干净的 OpenAI 形状错误
+> 响应（还没写过任何字节）；首字节后失败（stall 超时/客户端断开）→
+> 一个 `EventError` SSE 事件 + `[DONE]`，**绝不补一个假的
+> `finish_reason: stop`**——`TestCompletions_StallTimeoutAfterFirstByte`
+> 与 `TestCompletions_ClientDisconnectCancelsUpstream` 把这两条钉成了
+> 可重复运行的回归测试，不是靠代码评审保证。
+>
+> **两个抓到的真问题**：
+> 1. **watchdog 的两个布尔量最初不是原子的**——定时器触发回调运行在
+>    独立 goroutine，与主 goroutine 的读循环天然并发，`go test -race`
+>    当场标红。这不是可以靠"调用顺序"绕开的竞态，是这个类型存在的
+>    意义本身（提前打断一个正在阻塞的调用），因此改成 `atomic.Bool`。
+> 2. **`gateway.ValidateGateway` 起初被塞进通用的 `Config.Validate()`**，
+>    导致 `umaas-migrate`、`umaas seed`、`umaas admin create` 全部因为
+>    "没配置上游"而拒绝启动——这几个工具根本不碰数据平面。教训是：
+>    校验要挂在"谁真的需要它"上，不能因为方便就塞进一个所有二进制
+>    共用的入口。现已拆成独立方法，只在真正装配数据平面路由前调用。
+>
+> **顺带修了一个 I2 遗留的契约违规**：`response.Meta.NextCursor` 原来带
+> `omitempty`，导致最后一页（`next_cursor` 为 null）时这个 required 字段
+> 被整个从 JSON 里去掉。冒烟测试跑在空目录上时精确踩中了这条路径——
+> 这正是"每个迭代都要能演示"这条 DoD 的价值，单元测试用的都是非空数据，
+> 从没触发过这个分支。
 
 | 任务 | 内容 | 出处 | 依赖 | 判据 |
 |---|---|---|---|---|

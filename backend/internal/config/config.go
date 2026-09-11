@@ -40,6 +40,50 @@ type Config struct {
 	Redis    RedisConfig    `koanf:"redis"`
 	Observ   ObservConfig   `koanf:"observability"`
 	Log      LogConfig      `koanf:"log"`
+	Gateway  GatewayConfig  `koanf:"gateway"`
+}
+
+// GatewayConfig 是数据平面 I3 阶段的配置。
+//
+// **这是临时状态**：I4 的 P2/P3 会把 Channel 的来源从"一份启动期配置"
+// 换成数据库里的 channels 表 + 权重/健康检查选择逻辑。现在只有单渠道
+// 直连，配置一条足够，且这条配置在拆分成 channels 表时字段可以直接对应，
+// 不用推倒重来。
+type GatewayConfig struct {
+	Channel ChannelConfig `koanf:"channel"`
+	Stream  StreamConfig  `koanf:"stream"`
+}
+
+// ChannelConfig 是**引导用**的一条渠道定义。
+//
+// I4 起，路由渠道的真相源是数据库（provider_profiles/channels，
+// internal/store/postgres.RoutingRepo）——新增一个 OpenAI 兼容厂商是
+// 数据库里的几行，不需要重启进程改配置。这个结构体只在 `umaas seed`
+// 引导本地开发环境的第一条渠道时使用，服务启动本身不再依赖它。
+type ChannelConfig struct {
+	Name       string `koanf:"name"`
+	BaseURL    string `koanf:"base_url"`
+	APIKey     string `koanf:"api_key"`
+	AuthScheme string `koanf:"auth_scheme"` // bearer | header
+	AuthHeader string `koanf:"auth_header"` // AuthScheme=header 时使用
+	// Quirks（UNIFIED-PROVIDER-INTERFACE.md §4.4）：与标准协议的偏离项，
+	// 现在只暴露两个最常见的，其余等接入第二家上游时再加。
+	NoStreamUsage     bool `koanf:"no_stream_usage"`
+	MaxTokensRequired bool `koanf:"max_tokens_required"`
+}
+
+// StreamConfig 是两段流式超时（UNIFIED-PROVIDER-INTERFACE.md §7）。
+//
+// 只设首字节超时不够：流已开始、上游中途卡住不再吐字节时，首字节超时
+// 早已失效。两者缺一都会在生产上表现为"某类请求偶尔挂住"，且现象
+// 与业务代码毫无关系，排查方向天然错误。
+type StreamConfig struct {
+	// FirstByteTimeout 覆盖"发出请求 → 首个 chunk"。仍在安全窗口内，
+	// I4 引入多渠道后这个超时触发时可以换渠道重试。
+	FirstByteTimeout time.Duration `koanf:"first_byte_timeout"`
+	// StallTimeout 覆盖"相邻两个 chunk 之间"。触发时已经吐给客户端
+	// 部分内容，只能中止并如实上报，不能重试。
+	StallTimeout time.Duration `koanf:"stall_timeout"`
 }
 
 // PlaneConfig 控制单个平面。两个平面独立启停，是 ARCHITECTURE.md §1 的直接落地。
@@ -137,6 +181,12 @@ func defaults() *Config {
 			CORSAllowedOrigins: []string{"http://localhost:5173", "http://localhost:5174"},
 		},
 		Log: LogConfig{Level: "info", Format: "json"},
+		Gateway: GatewayConfig{
+			Stream: StreamConfig{
+				FirstByteTimeout: 10 * time.Second,
+				StallTimeout:     30 * time.Second,
+			},
+		},
 	}
 }
 
@@ -225,6 +275,24 @@ func (c *Config) Validate() error {
 	case "debug", "info", "warn", "error":
 	default:
 		return fmt.Errorf("config: log.level must be debug|info|warn|error, got %q", c.Log.Level)
+	}
+	return nil
+}
+
+// ValidateGateway 拒绝不能启动数据平面的网关配置。
+//
+// **不放进 Validate()**：`umaas-migrate`、`umaas admin create`、`umaas seed`
+// 都要走 config.Load，但它们不启动数据平面（config.go 早先在这里踩过
+// 一次坑：把渠道要求塞进 Validate() 导致迁移工具直接拒绝启动）。
+// 调用方只在真的要装配数据平面路由前调用这个方法。
+//
+// **不检查 gateway.channel.base_url**：I4 起渠道来自数据库，进程启动时
+// 允许一条渠道都没有——那是"这个模型暂无供给"的运行时状态（B3 的
+// `no_channels_available`），不是不能起服务的理由。
+func (c *Config) ValidateGateway() error {
+	if c.Gateway.Stream.FirstByteTimeout <= 0 || c.Gateway.Stream.StallTimeout <= 0 {
+		return fmt.Errorf("config: gateway.stream.first_byte_timeout and stall_timeout must be positive " +
+			"(UNIFIED-PROVIDER-INTERFACE.md §7); a zero value would hang forever instead of failing loudly")
 	}
 	return nil
 }

@@ -22,8 +22,14 @@ type Envelope[T any] struct {
 }
 
 // Meta 承载分页游标与数据新鲜度。
+//
+// **NextCursor 没有 omitempty**：契约把它列为 required（PageMeta.required），
+// 只是允许值为 null——"最后一页"必须显式返回 `"next_cursor": null`，
+// 而不是把这个键整个从 JSON 里去掉。omitempty 在指针为 nil 时会连键
+// 一起丢，这在小数据量（分页刚好命中最后一页）下就会违反契约，
+// 且只有在最后一页时才会暴露——冒烟测试跑在空目录上时正好踩中了它。
 type Meta struct {
-	NextCursor *string `json:"next_cursor,omitempty"`
+	NextCursor *string `json:"next_cursor"`
 	UpdatedAt  *string `json:"updated_at,omitempty"`
 	Total      *int    `json:"total,omitempty"`
 }

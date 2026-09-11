@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -130,9 +131,12 @@ func (r *CatalogAdminRepo) ListModels(ctx context.Context, status string) ([]cat
 			Status: row.Status, CanaryPercent: row.CanaryPercent,
 			CallsLast7d: row.CallsLast7d, ReleasedAt: row.ReleasedAt,
 		}
-		// price_version_id 为 0（SQL 的 NULL 被 sqlc 定成非空 int64）表示没有价目。
-		if row.PriceVersionID != 0 {
-			v, err := r.priceByID(ctx, row.PriceVersionID)
+		priceID, err := decodeJSONInt64(row.PriceVersionID)
+		if err != nil {
+			return nil, err
+		}
+		if priceID != nil {
+			v, err := r.priceByID(ctx, *priceID)
 			if err != nil {
 				return nil, err
 			}
@@ -141,6 +145,24 @@ func (r *CatalogAdminRepo) ListModels(ctx context.Context, status string) ([]cat
 		out = append(out, m)
 	}
 	return out, nil
+}
+
+// decodeJSONInt64 读 to_jsonb(可空 bigint) 的结果。
+//
+// ListAdminModels 的 price_version_id 走 to_jsonb 而不是直接 scan 进 *int64：
+// sqlc 把 pricing_effective_version() 的返回类型静态推断成 NOT NULL bigint
+// （函数签名如此），draft 模型没有价目时会在扫描阶段直接 panic 式报错——
+// 这条路径只有在库里真的存在一个没有价目的模型时才会触发，用带价目的种子
+// 数据测不出来。
+func decodeJSONInt64(raw []byte) (*int64, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var v int64
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, fmt.Errorf("decode price_version_id: %w", err)
+	}
+	return &v, nil
 }
 
 func (r *CatalogAdminRepo) priceByID(ctx context.Context, id int64) (*pricing.Version, error) {

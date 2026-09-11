@@ -112,6 +112,17 @@ func TestValidateAcceptsGoodConfig(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestValidateGateway(t *testing.T) {
+	cfg := defaults()
+	cfg.Database.DSN = "postgres://localhost/umaas"
+
+	// I4 起渠道来自数据库；启动时零渠道是合法的运行时状态，不该拒绝启动。
+	require.NoError(t, cfg.ValidateGateway())
+
+	cfg.Gateway.Stream.StallTimeout = 0
+	require.Error(t, cfg.ValidateGateway(), "a zero stall timeout would hang forever instead of failing loudly")
+}
+
 func TestNormalizeKey(t *testing.T) {
 	assert.Equal(t, "database.dsn", NormalizeKey("UMAAS_DATABASE__DSN"))
 	assert.Equal(t, "control_plane.addr", NormalizeKey("UMAAS_CONTROL_PLANE__ADDR"))

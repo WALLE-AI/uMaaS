@@ -20,6 +20,7 @@ type Querier interface {
 	// 平台管理员。与 users 完全独立的一套（ARCHITECTURE.md §4.5）。
 	CreateAdminAccount(ctx context.Context, arg CreateAdminAccountParams) (AdminAccount, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) (AdminSession, error)
+	CreateChannel(ctx context.Context, arg CreateChannelParams) (Channel, error)
 	CreateMembership(ctx context.Context, arg CreateMembershipParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// 手写 SQL，sqlc 生成类型安全的 Go（ARCHITECTURE.md §2.2）。
@@ -35,10 +36,22 @@ type Querier interface {
 	GetAdminModelByPath(ctx context.Context, arg GetAdminModelByPathParams) (GetAdminModelByPathRow, error)
 	GetAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetAdminSessionByTokenHashRow, error)
 	GetBenchmarkBySlug(ctx context.Context, slug string) (GetBenchmarkBySlugRow, error)
+	// 数据平面用到的目录查询（B3）。
+	//
+	// 与 catalog.sql 的只读端点分开：那些服务的是"给人看的目录页"，
+	// 这一条服务的是"请求进来时能不能转发"。前者只暴露 listed，
+	// 后者要放行 canary——canary 的定义就是"可调用但不公开可见"
+	// （BILLING-AND-PRICING.md §3.6-③）。draft/delisted 一律拒绝。
+	GetCallableModelByPath(ctx context.Context, arg GetCallableModelByPathParams) (GetCallableModelByPathRow, error)
+	GetChannelByID(ctx context.Context, id int64) (GetChannelByIDRow, error)
 	GetDocsPage(ctx context.Context, slug string) (GetDocsPageRow, error)
 	// 详情页。与 ListModels 取价格的方式**必须一致**——同一个函数，同一个 scope。
 	GetModelByPath(ctx context.Context, arg GetModelByPathParams) (GetModelByPathRow, error)
 	GetPriceVersionByID(ctx context.Context, id int64) (ModelPrice, error)
+	// 手工连通性测试选模型的优先级第二档：该渠道标了 is_probe 的模型
+	// （UNIFIED §5.6-①）。第一档"admin 显式指定"与第三档"近 7 日调用量最高"
+	// 由调用方在 Go 侧决定，不是每一档都值得写成 SQL。
+	GetProbeChannelModel(ctx context.Context, channelID int64) (GetProbeChannelModelRow, error)
 	GetProviderBySlug(ctx context.Context, slug string) (Provider, error)
 	// 一次查询同时拿到会话与用户：会话校验在每个请求上都要跑，
 	// 分两次查等于把控制平面的 QPS 乘以 2。
@@ -51,6 +64,10 @@ type Querier interface {
 	InsertModelActivity(ctx context.Context, arg InsertModelActivityParams) error
 	InsertPriceVersion(ctx context.Context, arg InsertPriceVersionParams) (ModelPrice, error)
 	// admin 看得到全部四态；web 只看得到 listed。
+	// price_version_id 走 LEFT JOIN LATERAL 而不是直接调用函数：直接调用会被
+	// sqlc 推断成 NOT NULL bigint（函数签名如此），draft 模型没有价目时
+	// 会在扫描阶段报 "cannot scan NULL into *int64"——这条路径只有在真的存在
+	// 一个没有价目的模型时才会被触发，冒烟测试的种子数据没覆盖到就会漏网。
 	ListAdminModels(ctx context.Context, status *string) ([]ListAdminModelsRow, error)
 	ListAdmins(ctx context.Context) ([]AdminAccount, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
@@ -58,6 +75,11 @@ type Querier interface {
 	ListBenchmarkResults(ctx context.Context, benchmarkIds []int64) ([]ListBenchmarkResultsRow, error)
 	// ── 评测 ──────────────────────────────────────────────────────
 	ListBenchmarks(ctx context.Context, category *string) ([]ListBenchmarksRow, error)
+	// 一个模型的全部候选渠道（B3/P3 的路由热路径）。
+	// 复合索引 (model_id, enabled) 已经建在 channel_models 上；渠道状态与
+	// 限流窗口在这里一并过滤，避免路由代码里再判断一次。
+	ListCandidateChannels(ctx context.Context, modelID int64) ([]ListCandidateChannelsRow, error)
+	ListChannelsDueForProbe(ctx context.Context) ([]ListChannelsDueForProbeRow, error)
 	// ── 文档 ──────────────────────────────────────────────────────
 	ListDocsNavigation(ctx context.Context) ([]ListDocsNavigationRow, error)
 	ListFeaturedModelIDs(ctx context.Context, rowLimit int32) ([]int64, error)
@@ -94,6 +116,12 @@ type Querier interface {
 	RankModelsByColumn(ctx context.Context, arg RankModelsByColumnParams) ([]RankModelsByColumnRow, error)
 	// ── 榜单 ──────────────────────────────────────────────────────
 	RankModelsByUsage(ctx context.Context, arg RankModelsByUsageParams) ([]RankModelsByUsageRow, error)
+	// Beta 后验更新：一次失败 = beta+1。429 时额外设置限流窗口
+	// （rateLimitFactor 的输入，UNIFIED §5.5 的乘性护栏）。
+	RecordChannelFailure(ctx context.Context, arg RecordChannelFailureParams) error
+	// Beta 后验更新：一次成功 = alpha+1。同时把限流窗口清掉、连续失败清零、
+	// 更新延迟 EMA（平滑系数 0.3，足够快地反映最近状况又不被单次抖动带偏）。
+	RecordChannelSuccess(ctx context.Context, arg RecordChannelSuccessParams) error
 	// 价目查询（M1 / M1a / M1b）。
 	//
 	// **本文件是价目的唯一 SQL 入口。** catalog 侧只在 catalog.sql 里通过同一个
@@ -109,6 +137,16 @@ type Querier interface {
 	// at 由调用方给：结算必须传 RequestContext.ReceivedAt 而不是 now()，
 	// 否则一次跨越改价时刻的长流会中途换价（§3.3-3）。
 	ResolvePriceVersion(ctx context.Context, arg ResolvePriceVersionParams) (ModelPrice, error)
+	// ── 路由策略（X9）───────────────────────────────────────────────
+	// 解析顺序 model > workspace > global，整体覆盖（计价 §3.4 同一原则）。
+	//
+	// **不能写成 `(scope_kind, scope_id) IN ((...), (...), ('global', NULL))`**：
+	// SQL 的行比较里只要有一个分量是 NULL，整行比较结果就是 UNKNOWN 而不是
+	// TRUE——即使目标行的 scope_id 也是 NULL。用这种写法时 scope_kind='global'
+	// 的策略永远匹配不到，会静默退回调用方的默认值（这里是 balanced），
+	// 而不是报错，因此第一次真实验证时才会暴露。改用显式的 OR + IS NOT
+	// DISTINCT FROM，它对 NULL 的语义是"两边都是 NULL 时也算相等"。
+	ResolveRoutingPolicy(ctx context.Context, arg ResolveRoutingPolicyParams) (RoutingPolicy, error)
 	RevokeAdminSession(ctx context.Context, tokenHash []byte) error
 	RevokeAllAdminSessions(ctx context.Context, adminID int64) error
 	RevokeAllUserSessions(ctx context.Context, userID int64) error
@@ -126,8 +164,12 @@ type Querier interface {
 	SetModelPresentation(ctx context.Context, arg SetModelPresentationParams) error
 	SetModelStatus(ctx context.Context, arg SetModelStatusParams) (Model, error)
 	TouchAdminActivity(ctx context.Context, id int64) error
+	// 探针退休（§5.5 末段）：连续失败越多，下一次自动探测的间隔越长，
+	// 上限由调用方算好传入——避免对已死的上游持续打无效请求。
+	TouchChannelProbe(ctx context.Context, arg TouchChannelProbeParams) error
 	UpsertBenchmark(ctx context.Context, arg UpsertBenchmarkParams) (int64, error)
 	UpsertBenchmarkResult(ctx context.Context, arg UpsertBenchmarkResultParams) error
+	UpsertChannelModel(ctx context.Context, arg UpsertChannelModelParams) error
 	UpsertDocsPage(ctx context.Context, arg UpsertDocsPageParams) error
 	// **status 不在 SET 列表里**：发布/下架是独立的、要校验价目完整性的动作，
 	// 不能被一次元数据编辑顺手带过去（计价 §3.6-③）。
@@ -136,6 +178,9 @@ type Querier interface {
 	UpsertOAuthIdentity(ctx context.Context, arg UpsertOAuthIdentityParams) error
 	// ── admin 写入口（M1a）─────────────────────────────────────────
 	UpsertProvider(ctx context.Context, arg UpsertProviderParams) (Provider, error)
+	// 供给与路由（I4：P2/P3/B4/X9/X10）。
+	UpsertProviderProfile(ctx context.Context, arg UpsertProviderProfileParams) (ProviderProfile, error)
+	UpsertRoutingPolicy(ctx context.Context, arg UpsertRoutingPolicyParams) (RoutingPolicy, error)
 }
 
 var _ Querier = (*Queries)(nil)

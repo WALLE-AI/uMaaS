@@ -31,6 +31,9 @@ import (
 	"github.com/WALLE-AI/uMaaS/backend/internal/observ"
 	"github.com/WALLE-AI/uMaaS/backend/internal/platform"
 	"github.com/WALLE-AI/uMaaS/backend/internal/pricing"
+	"github.com/WALLE-AI/uMaaS/backend/internal/provider"
+	"github.com/WALLE-AI/uMaaS/backend/internal/provider/openaicompat"
+	"github.com/WALLE-AI/uMaaS/backend/internal/requestlog"
 	"github.com/WALLE-AI/uMaaS/backend/internal/store"
 	"github.com/WALLE-AI/uMaaS/backend/internal/store/postgres"
 )
@@ -176,15 +179,50 @@ func run() error {
 		g.Go(func() error { return serve(gctx, logger, "control-plane", srv) })
 	}
 
+	var requestLogs *requestlog.Writer
 	if cfg.DataPlane.Enabled {
+		// 只在真的要装配数据平面时才要求渠道配置——`umaas-migrate`/`umaas seed`/
+		// `umaas admin create` 也走 config.Load，但它们不启动数据平面
+		// （config.go 的 ValidateGateway 注释解释了为什么不放进 Validate()）。
+		if err := cfg.ValidateGateway(); err != nil {
+			return err
+		}
+		requestLogs = requestlog.NewWriter(db)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			requestLogs.Close(shutdownCtx)
+		}()
+
+		// I4：渠道来自数据库（provider_profiles/channels），不是启动期配置。
+		// Router 每次请求都查一次候选（RoutingRepo 内部无缓存——渠道是慢变
+		// 数据，秒级 TTL 缓存是下一步优化，现在先保证正确性）。
+		httpClient := &http.Client{}
+		newDriver := func(p provider.Profile) gateway.UpstreamDoer { return openaicompat.New(p, httpClient) }
+		routingRepo := postgres.NewRoutingRepo(db, cipher)
+		channelRouter := gateway.NewChannelRouter(routingRepo)
+
 		srv := newServer(cfg.DataPlane, gateway.NewRouter(gateway.Deps{
-			Config:   cfg,
-			Services: services,
-			Version:  version,
-			Metrics:  httpMetrics,
+			Config: cfg, Services: services, Version: version, Metrics: httpMetrics,
+			Completions: &gateway.CompletionsHandler{
+				Models: postgres.NewGatewayModelRepo(db), Router: channelRouter,
+				NewDriver: newDriver, Pricing: resolver, Logs: requestLogs,
+				FirstByteTimeout: cfg.Gateway.Stream.FirstByteTimeout,
+				StallTimeout:     cfg.Gateway.Stream.StallTimeout,
+			},
 		}))
 		servers = append(servers, srv)
 		g.Go(func() error { return serve(gctx, logger, "data-plane", srv) })
+
+		// B4 的后台健康探针：定期给到期的渠道发一次探测请求，结果喂进
+		// Beta 后验。与 X10 的手工测试是**两条独立代码路径**（gateway.ProbeService
+		// 的 ManualTest/AutoProbe），不共用一个 isManual 参数。
+		healthChecker := &gateway.HealthChecker{
+			Repo:      routingRepo,
+			Probe:     &gateway.ProbeService{Repo: routingRepo, Logs: requestLogs},
+			NewDriver: newDriver,
+		}
+		g.Go(func() error { healthChecker.Run(gctx); return nil })
 	}
 
 	if metrics != nil {

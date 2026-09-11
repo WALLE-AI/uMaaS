@@ -55,3 +55,19 @@ observability:
 log:
   level: info   # debug | info | warn | error
   format: json  # json | text
+
+gateway:
+  # I3：单渠道直连，没有 channels 表（I4 才建）。上游必须是 OpenAI 兼容协议。
+  channel:
+    name: "default"
+    base_url: "https://api.openai.com"
+    api_key: ""            # 建议用环境变量 UMAAS_GATEWAY__CHANNEL__API_KEY 注入，不进配置文件
+    auth_scheme: bearer    # bearer | header
+    auth_header: ""        # auth_scheme=header 时使用，如 "x-api-key"
+    no_stream_usage: false
+    max_tokens_required: false
+  stream:
+    # 两段流式超时（UNIFIED-PROVIDER-INTERFACE.md §7）。
+    # 只设 first_byte_timeout 不够：流已开始、上游中途卡住时它早已失效。
+    first_byte_timeout: 10s
+    stall_timeout: 30s

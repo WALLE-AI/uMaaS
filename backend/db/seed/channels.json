@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "开发/冒烟用的渠道种子。base_url 指向本机的一个假上游（fakeupstream 测试脚本），",
+    "证明 P2 的判据：provider_profiles + channels + channel_models 是纯数据，",
+    "接入时不需要写任何新的 Go 代码——同一个 openaicompat 驱动服务所有行。"
+  ],
+  "providers": [
+    { "slug": "local-openai-compat", "name": "本地假上游", "protocol": "openai_compat",
+      "base_url": "http://127.0.0.1:28099", "auth_scheme": "bearer", "auth_header": "" }
+  ],
+  "channels": [
+    {
+      "provider": "local-openai-compat", "name": "primary", "api_key": "dev-key",
+      "priority": 10, "weight": 100,
+      "models": [
+        { "model": "openai/gpt-5.6-sol", "upstream_model": "gpt-5.6-sol", "is_probe": true }
+      ]
+    }
+  ]
+}

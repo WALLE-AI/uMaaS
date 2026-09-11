@@ -25,6 +25,9 @@ type Deps struct {
 	Services *assembly.Services
 	Version  string
 	Metrics  *observ.HTTPMetrics
+	// Completions 为 nil 时 /v1/chat/completions 不挂载
+	// （单元测试里常用，也覆盖了 data_plane 未配置渠道的边缘情况）。
+	Completions *CompletionsHandler
 }
 
 // NewRouter 组装数据平面路由。
@@ -41,8 +44,9 @@ func NewRouter(deps Deps) http.Handler {
 	}
 
 	r.Route("/v1", func(r chi.Router) {
-		// I3 起挂载：
-		//   r.Post("/chat/completions", completions.Handler(deps))
+		if deps.Completions != nil {
+			r.Post("/chat/completions", deps.Completions.ServeHTTP)
+		}
 		r.NotFound(openAIError(http.StatusNotFound, "not_found",
 			"the requested endpoint is not implemented yet"))
 	})
